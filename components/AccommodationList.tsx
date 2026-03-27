@@ -1,0 +1,79 @@
+'use client';
+
+export default function AccommodationList({
+  items,
+  webSearchUsed,
+}: {
+  items: any[];
+  webSearchUsed?: boolean;
+}) {
+  if (!items?.length) return null;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-100 p-5">
+      <h3 className="font-semibold text-gray-900 mb-2">🏨 住宿推荐</h3>
+      {webSearchUsed ? (
+        <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 mb-4 leading-relaxed">
+          以下为<strong>联网检索</strong>公开网页后，由 AI 对多条摘要做的归纳（优势 / 劣势）。不跳转外链；具体房价、房态与最新评价仍可能变化，预订前建议你在常用 App 里再搜店名核对。
+        </p>
+      ) : (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4 leading-relaxed">
+          当前<strong>未开启联网检索</strong>（在服务端配置 <code className="bg-amber-100 px-1 rounded">TAVILY_API_KEY</code> 后，会自动搜索网页摘要再汇总成优劣势）。下面是模型根据常识整理的参考，可信度低于联网汇总。
+        </p>
+      )}
+      <div className="space-y-5">
+        {items.map((a: any, i: number) => {
+          const pros = Array.isArray(a.pros) ? a.pros : [];
+          const cons = Array.isArray(a.cons) ? a.cons : [];
+
+          return (
+            <div key={i} className="border border-gray-100 rounded-xl p-4 bg-gray-50/40">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <span className="text-sm font-semibold text-gray-900">
+                  {a.name}
+                  {a.pricePerNight > 0 ? `（¥${a.pricePerNight}/晚）` : ''}
+                </span>
+                <span className="text-xs font-medium text-orange-600 shrink-0">
+                  {a.pricePerNight > 0 ? `参考 ¥${a.pricePerNight}/晚` : '参考价未标注'}
+                </span>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                {a.type}
+                {a.area ? ` · ${a.area}` : ''}
+              </p>
+              {a.highlights ? <p className="text-xs text-gray-600 mt-2 leading-relaxed">{a.highlights}</p> : null}
+              {a.webNote ? (
+                <p className="text-xs text-gray-400 mt-2 italic leading-relaxed">说明：{a.webNote}</p>
+              ) : null}
+
+              {(pros.length > 0 || cons.length > 0) && (
+                <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {pros.length > 0 && (
+                    <div className="rounded-lg bg-green-50 border border-green-100 px-3 py-2">
+                      <p className="text-xs font-medium text-green-800 mb-1.5">优势</p>
+                      <ul className="text-xs text-green-900 space-y-1 list-disc pl-4">
+                        {pros.map((t: string, j: number) => (
+                          <li key={j}>{t}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {cons.length > 0 && (
+                    <div className="rounded-lg bg-orange-50/80 border border-orange-100 px-3 py-2">
+                      <p className="text-xs font-medium text-orange-900 mb-1.5">劣势 / 注意</p>
+                      <ul className="text-xs text-orange-950/90 space-y-1 list-disc pl-4">
+                        {cons.map((t: string, j: number) => (
+                          <li key={j}>{t}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
