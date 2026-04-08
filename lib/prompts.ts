@@ -4,6 +4,7 @@ import {
   PACE_OPTIONS,
   INTEREST_OPTIONS,
   ACCOM_OPTIONS,
+  ACCOM_STYLE_OPTIONS,
   FOOD_PREF_OPTIONS,
   BUDGET_LEVEL_OPTIONS,
   TRANSPORT_OPTIONS,
@@ -27,9 +28,53 @@ export function calendarTripDays(startDate: string, endDate: string): number {
   return Math.max(1, Math.ceil((e - s) / 86400000) + 1);
 }
 
+/** 按用户「旅行节奏」约束每日 activities 条数下限（产品核心：拒绝「一天只有一两个点」的敷衍排程） */
+function resolvePaceDailyDensity(
+  paceKey: string,
+  longTrip: boolean,
+): { min: number; max: number; coverage: string } {
+  const lt = longTrip;
+  switch (paceKey) {
+    case 'intensive':
+      return {
+        min: lt ? 3 : 4,
+        max: 6,
+        coverage:
+          '须有明显「上午 + 下午 + 晚间」三段安排（晚间可为夜市、夜景、演出、清吧小酌等）；转场日可略减 1 条但仍须写清交通与到达后安排。',
+      };
+    case 'balanced':
+      return {
+        min: 3,
+        max: 5,
+        coverage:
+          '每天至少覆盖上午与下午；多数日期晚间应有 1 项轻量安排（散步、夜市、本地演出等），避免下午后空白。',
+      };
+    case 'relaxed':
+      return {
+        min: 3,
+        max: 4,
+        coverage:
+          '节奏舒缓但**禁止**「全天仅 1～2 条」：仍须每天 ≥3 条，可缩短单条时长、增加咖啡/公园留白。',
+      };
+    case 'half':
+      return {
+        min: 2,
+        max: 4,
+        coverage:
+          '「半天玩半天休」：游玩时段须 ≥2 条具体安排，另一半天写「午休/酒店泳池/自由逛街」等，不得用一条「自由活动」糊弄整天。',
+      };
+    default:
+      return {
+        min: 3,
+        max: 5,
+        coverage: '每天不少于 3 条可执行活动，覆盖上下午。',
+      };
+  }
+}
+
 export function buildMultiPlanPrompt(
   data: TripFormData,
-  opts?: { hotelWebContext?: string; weatherContext?: string }
+  opts?: { hotelWebContext?: string; weatherContext?: string; transportFoodContext?: string; realDataContext?: string }
 ): string {
   const p = data.preferences;
   const destinations = data.destinations.join('、');
@@ -43,7 +88,10 @@ export function buildMultiPlanPrompt(
   } else if (data.dateMode === 'flexible_end') {
     dateSection = `- 出发日期：${data.startDate}，返回日期不确定（请根据目的地数量和旅行节奏推荐合适的天数）`;
   } else {
-    dateSection = `- 出行日期完全不确定（请推荐最佳旅游季节和合适的天数）`;
+    const hint = data.dateHint?.trim();
+    dateSection = hint
+      ? `- 出行日期不确定，用户的时间偏好：${hint}（请结合偏好推荐最佳旅游季节和合适的天数）`
+      : `- 出行日期完全不确定（请推荐最佳旅游季节和合适的天数）`;
   }
 
   const companion = findLabel(COMPANION_OPTIONS, p.companion);
@@ -53,6 +101,10 @@ export function buildMultiPlanPrompt(
   const interests = findLabels(INTEREST_OPTIONS, p.interests);
   const interestLine = interests ? `- 兴趣偏好：${interests}` : '- 兴趣偏好：无特定偏好，请综合推荐当地最值得体验的内容';
   const accom = findLabel(ACCOM_OPTIONS, p.accommodation);
+  const accomStyles = p.accommodationStyles?.filter(s => s && s !== 'no_preference') ?? [];
+  const accomStyleDesc = accomStyles.length > 0
+    ? accomStyles.map(s => ACCOM_STYLE_OPTIONS.find(o => o.value === s)).filter(Boolean).map(o => `${o!.label}（${o!.desc}）`).join('、')
+    : '';
   const foodPrefs = findLabels(FOOD_PREF_OPTIONS, p.foodPrefs);
   const foodLine = foodPrefs ? `- 餐饮偏好：${foodPrefs}` : '- 餐饮偏好：不限';
   const dietaryNote = p.dietaryNotes ? `\n- 饮食忌口/特殊需求：${p.dietaryNotes}` : '';
@@ -60,23 +112,73 @@ export function buildMultiPlanPrompt(
   const budgetDesc = budget ? `${budget.label}（${budget.desc}）` : p.budgetLevel;
   const transports = findLabels(TRANSPORT_OPTIONS, p.transportModes);
   const hasMotorcycle = p.transportModes?.includes('motorcycle');
+  const isMountainRun = p.motoRideType === 'mountain_run';
+  const mountainRunVehicle = p.mountainRunVehicle || (hasMotorcycle ? 'motorcycle' : 'car');
   const motoBikeType = p.motoBikeType?.trim();
   const motoDailyKm = p.motoDailyKm || 220;
   const motoAllowNightRide = p.motoAllowNightRide === 'yes' ? '可接受短时夜骑' : '不接受夜骑';
   const wakeUp = findLabel(WAKE_OPTIONS, p.wakeUpTime);
   const mustVisit = p.mustVisit ? `\n- 必去的地方：${p.mustVisit}` : '';
-  const mustAvoid = p.mustAvoid ? `\n- 不想去的地方：${p.mustAvoid}` : '';
+  const mustAvoid = p.mustAvoid ? `\n- 不想去的地方/不想参加的活动：${p.mustAvoid}` : '';
   const specialNeeds = p.specialNeeds ? `\n- 特殊需求：${p.specialNeeds}` : '';
 
-  const isFast = data.generationMode === 'fast';
-  const planCountText = isFast ? '请生成 1 个高质量、可直接执行的方案，优先速度和实用性。' : '请生成 2 个有区分度的旅行方案（例如紧凑版和休闲版），让我可以对比选择。每个方案要有明确的差异化定位。';
-  const longTrip = fixedDayCount != null && fixedDayCount > 10;
-  const outputLimitText = isFast
-    ? `控制输出长度：itinerary 每天活动不超过${longTrip ? 1 : 2}个（长途可多写 notes 概括），attractions不超过4个，accommodations不超过${longTrip ? 5 : 3}个，foodSpots不超过4个。`
-    : `控制输出长度：itinerary 每天活动不超过${longTrip ? 2 : 3}个，attractions不超过6个，accommodations不超过${longTrip ? 6 : 4}个，foodSpots不超过6个。`;
-  const motorcycleGuide = hasMotorcycle
-    ? `\n摩托车模式额外要求（非常重要）：\n- 重点放在“骑行路线攻略”而不是单纯景点罗列\n- 骑行设定：车型/排量=${motoBikeType || '未提供'}；每日可接受里程约=${motoDailyKm}km；夜骑偏好=${motoAllowNightRide}\n- transportDetail 要写清楚每日骑行路线、里程区间、建议骑行时长\n- itinerary 的 notes 里尽量包含：路况特点、弯道/海拔变化、补给加油点、休息点、观景打卡点\n- 如果某天里程超过 ${motoDailyKm}km，请主动拆分路线或建议中途住宿\n- tips 必须包含：装备建议（头盔/护具/雨具）、天气和风况提醒、夜骑风险、安全注意事项\n- 风格可参考小红书/抖音热门摩旅攻略：强调“路线体验感”和“可执行性”`
+  const mustAvoidHardRules = p.mustAvoid?.trim()
+    ? `
+
+【用户否决项 — 必须遵守（不可打折扣）】
+- 用户已声明：${p.mustAvoid.trim()}
+- 若表述含「不去任何博物馆」「不要博物馆」「拒绝博物馆」等：**禁止**在 itinerary、attractions、transportDetail、tips、foodSpots 中安排或推荐「博物馆、博物院、纪念馆、美术馆、艺术馆、陈列馆」及「常设/临时展览、室内看展」等同类活动；不得以「看展」「特展」「文化展览」「艺术空间」等表述绕过。
+- 对用户否决项中的其他类型（如商业化古镇、爬山、某类食物等），同样禁止用同义替换或换皮推荐。
+`
     : '';
+
+  const isFast = data.generationMode === 'fast';
+  const paceKey = p.pace || 'balanced';
+  const density = resolvePaceDailyDensity(paceKey, fixedDayCount != null && fixedDayCount > 10);
+
+  const planCountText = isFast
+    ? '请生成 1 个高质量、可直接执行的方案。'
+    : '请生成 2 个**体验维度不同**的方案（例如：A 侧重「历史街区 + 城市烟火 + 夜间经济」，B 侧重「自然风光 + 文艺街区 + 慢咖啡」）。两方案须在**主题组合、动线强度、用餐与夜游风格**上拉开差距；禁止仅总价/酒店档次不同而每日景点高度雷同。';
+
+  const longTrip = fixedDayCount != null && fixedDayCount > 10;
+
+  const productCoreBlock = `
+
+【产品核心 — 每日推荐必须「饱满」】
+- 本产品与「只列 1～2 个景点」的极简行程工具不同：你必须输出**像真实旅行攻略一样可分时段执行的一天**，这是差异化所在。
+- 用户选择的节奏为「${paceDesc}」。在此前提下，itinerary 中**每个自然日**的 activities 数量须满足：**至少 ${density.min} 条、建议 ${density.max} 条以内**（为控制篇幅，单条描述可简短，但**条数不能缩水**）。
+- 时段覆盖要求：${density.coverage}
+- **抵达/首末日**：若涉及机场/高铁到达，须额外写出「入住后傍晚」或「返程前上午」至少 1 项可执行安排，不得让整天停在「抵达机场」一条上结束。
+- **纯转场日**：可略少 1 条，但仍须写清交通段 + 到达后 1～2 项轻量活动（安顿、简餐、周边散步）。
+- attractions / foodSpots 作为「亮点清单」须与 itinerary 相互呼应，不得出现 itinerary 很空但 attractions 堆砌的脱节。`;
+
+  const outputLimitText = `篇幅与上限（在满足上文「每日条数下限」前提下）：单条 activity 的 notes 尽量不超过 40 字；attractions 总数建议不超过 ${isFast ? 14 : 22} 条；accommodations ${isFast ? '3～5' : '4～7'} 条；foodSpots ${isFast ? '4～8' : '6～12'} 条。`;
+
+  const hasSelfDrive = p.transportModes?.includes('self_drive');
+  const selfDriveGuide = hasSelfDrive
+    ? `\n自驾游模式额外要求（非常重要）：\n- 重点放在"自驾路线规划"，每日行程必须包含驾车路段说明\n- transportDetail 必须写清楚：全程预估总里程和总驾车时长；每日驾车路段（A→B，约X公里，约X小时）；推荐走的高速/国道名称（如G2京沪高速、G4京港澳高速、318国道等）；高速费预估\n- itinerary 里每天 activities 须含一条"当日驾车转场"条目（如"自驾前往XX"）：duration 写驾车耗时，notes 写路线建议和途经服务区\n- 每日驾车时长控制：单日不超过4-5小时（长途不超过6小时）；两地超500km须安排中间住宿；连续驾车超2小时在notes里建议休息\n- 每段超2小时高速路段，notes里推荐1-2个途中服务区或沿途可短停的观景点\n- tips 须含：自驾安全提醒、加油建议（偏远地区提前加满油）、停车注意、高速路况提醒\n- costBreakdown 的 transport 费用要包含油费和过路费预估`
+    : '';
+
+  // isMountainRun always exits via the early return above, so this is only for motorcycle touring
+  const motorcycleGuide = !hasMotorcycle ? '' : `
+摩托车摩旅模式额外要求（非常重要）：
+- 重点放在"骑行路线攻略"而不是单纯景点罗列
+- 骑行设定：车型/排量=${motoBikeType || '未提供'}；每日可接受里程约=${motoDailyKm}km；夜骑偏好=${motoAllowNightRide}
+- **禁摩路段规避（极其重要）**：
+  · 摩托车**严禁上高速公路**（中国法规规定排量250cc以下不得上高速，即使250cc以上也有诸多限制）
+  · 路线规划必须走**国道、省道、县道**，不能规划走高速
+  · 部分城市市区有禁摩令（如广州、深圳、东莞核心区、北京四环内等），路线须绕开禁摩区域或标注"此段需绕行/推车通过"
+  · transportDetail 里如涉及禁摩城市，必须注明禁摩范围和建议绕行路线
+- **加油规划（重要）**：
+  · 根据车型排量估算油耗和续航里程（如150cc约2.5L/100km，250cc约3.5L/100km，500cc约5L/100km）
+  · 每天的 itinerary notes 里标注沿途加油站位置，特别是偏远地区（如西藏、新疆、青海）提醒提前加满
+  · 如果某段路程超过150km无加油站，必须在前一个加油点提醒加满
+- transportDetail 要写清楚每日骑行路线名称（如G318国道、G214滇藏线等）、里程区间、建议骑行时长
+- itinerary 的 notes 里包含：路况特点、弯道/海拔变化、补给加油点、休息点、观景打卡点
+- 如果某天里程超过 ${motoDailyKm}km，请主动拆分路线或建议中途住宿
+- **住宿推荐须考虑摩托车停放**：优先推荐有停车场/院子的客栈民宿，避免推荐市区高层酒店
+- tips 必须包含：装备建议（全盔/护具/骑行服/雨衣/手套/骑行靴）、天气和风况提醒、高原反应提醒（如涉及高海拔）、夜骑风险、链条保养、每日骑行前车辆检查要点
+- 风格参考小红书/抖音热门摩旅攻略：强调"路线体验感"和"可执行性"`;
 
   let destinationLine = '';
   if (data.destinationMode === 'specific') {
@@ -97,7 +199,79 @@ export function buildMultiPlanPrompt(
     const themes = (data.destinationThemes || []).map((t) => themeMap[t] || t).join('、');
     destinationLine = `- 目的地偏好：${themes || '未指定'}；补充要求：${data.destinationHint || '无'}。请先从出发地周边和近期热门中推荐2-4个合适目的地，再规划路线。`;
   } else {
-    destinationLine = `- 用户暂无目的地；补充要求：${data.destinationHint || '无'}。请根据出发地推荐近期热门、适合短途出游的目的地，再给出可执行路线。`;
+    const openDetails = data.openModeDetails || [];
+    const openDetailMap: Record<string, string> = {
+      nearby: '周边短途游',
+      fly_short: '飞一趟/坐高铁去一个目的地，3-5天小长假',
+      long_route: '跨省长线多城联游',
+      nature_first: '自然风景为主',
+      city_first: '城市体验为主',
+    };
+    const tags = openDetails.map((k) => openDetailMap[k] || '').filter(Boolean);
+    const tagLine = tags.length ? tags.join('；') : '未特别限定';
+
+    const modeRules: string[] = [];
+
+    if (openDetails.includes('nearby')) {
+      modeRules.push(`【周边游 — 用户选了"就近周边转转"】
+- 用户想在出发地附近玩，**严禁推荐单程超过3小时高铁/自驾的目的地**。
+- 推荐范围：出发地**同省或相邻省份**，车程/高铁1-3小时内。
+- 举例：北京 → 古北水镇、延庆、保定、张家口、承德、天津、秦皇岛；上海 → 苏州、杭州、乌镇、千岛湖；成都 → 都江堰、峨眉山、乐山、雅安；广州 → 佛山、清远、珠海、开平。
+- **绝对不能**推荐跨大半个中国的路线（如北京→南昌、上海→云南）。
+- 推荐2-4个**相邻的**周边目的地串联，彼此车程不超过2小时。天数多时深度玩周边，不要跑远。`);
+    }
+
+    if (openDetails.includes('fly_short')) {
+      modeRules.push(`【飞一趟 — 用户选了"飞一趟3-5天"】
+- 用户愿意坐飞机或长途高铁去**一个**目的地城市/区域，做3-5天的深度游。
+- 推荐**1个核心目的地**（可含周边小众景点），不要安排3个以上城市的赶场式行程。
+- 适合的推荐：有独特体验、美食或风景的热门旅行城市（如长沙、重庆、西安、厦门、大理、桂林等）。
+- 行程节奏要适中：到达日和离开日各安排半天活动，中间几天深入体验。
+- 不要推荐出发地周边1-2小时就能到的地方（那是"周边转转"的范围）。`);
+    }
+
+    if (openDetails.includes('long_route')) {
+      modeRules.push(`【长线游 — 用户选了"跨省长线玩透一点"】
+- 用户想要一次走多个城市/省份的深度路线，不怕路途远。
+- 推荐一条**有地理逻辑的串联路线**（如丝绸之路、云贵环线、江南水乡联游等），3-6个目的地。
+- 路线必须地理上连贯，不能东跳西跳（如上海→西安→厦门→成都这种随机排列）。
+- 每个城市至少安排1-2天深度体验，不要走马观花每个城市只待半天。
+- transportDetail 要写清楚城市间的交通衔接方式和大致耗时。`);
+    }
+
+    if (openDetails.includes('nature_first')) {
+      modeRules.push(`【自然风景优先 — 用户选了"自然风景为主"】
+- 行程**以山水、湖泊、草原、海岸、森林、峡谷等自然风光为核心**。
+- 优先安排户外徒步、观景、日出日落、漂流、骑行等自然体验活动。
+- **减少**纯城市商圈逛街、博物馆、商业步行街等室内/城市活动的占比（交通中转除外）。
+- 住宿可推荐景区民宿、山间酒店、湖景房等贴近自然的选择。
+- 举例：张家界、九寨沟、稻城亚丁、青海湖、漓江、武功山、呼伦贝尔、千岛湖等。`);
+    }
+
+    if (openDetails.includes('city_first')) {
+      modeRules.push(`【城市体验优先 — 用户选了"城市体验为主"】
+- 行程**以城市生活体验为核心**：美食探店、夜市/夜景、文艺街区、展览演出、咖啡厅酒吧、本地市井烟火。
+- 优先安排高评分餐厅、网红打卡地、有特色的街区漫步、夜间活动。
+- **减少**纯自然风光和需要长时间徒步的户外活动占比。
+- 住宿推荐市中心交通方便、靠近美食街区的酒店。
+- 举例：长沙（美食夜市）、成都（火锅+太古里）、重庆（魔幻夜景）、西安（回民街+大唐不夜城）、广州（早茶+西关）等。`);
+    }
+
+    const modeRuleBlock = modeRules.length > 0 ? '\n\n' + modeRules.join('\n\n') : '';
+    destinationLine = `- 用户暂无具体目的地，由你根据出发地推荐；大致方向：${tagLine}。补充要求：${data.destinationHint || '无'}。请综合这些偏好推荐目的地并给出可执行路线。${modeRuleBlock}`;
+  }
+
+  // Trip duration constraint for destination recommendations
+  const tripDays = fixedDayCount ?? null;
+  let durationConstraint = '';
+  if (tripDays !== null) {
+    if (tripDays <= 1) {
+      durationConstraint = `\n\n【短途行程硬性约束 — 仅1天】\n- 总行程只有1天（当天往返），**严禁推荐需要跨省或单程超过2小时交通的目的地**。\n- 必须在出发地城市内部或周边1-2小时车程内安排所有活动。\n- 例如：北京出发1天 → 只能安排北京市区/周边（如故宫、长城、颐和园、古北水镇等），**绝对不能去南昌、上海等外省城市**。\n- 即使用户选了"我完全没想法"，也必须只推荐出发地本市或近郊目的地。`;
+    } else if (tripDays <= 2) {
+      durationConstraint = `\n\n【短途行程约束 — 仅2天】\n- 总行程只有2天（含1晚），目的地必须在出发地2-3小时高铁/自驾范围内。\n- 不要推荐需要飞行或超过3小时火车才能到达的远距离城市。\n- 优先推荐出发地周边省份的热门短途目的地。`;
+    } else if (tripDays <= 3) {
+      durationConstraint = `\n\n【行程时间约束 — 3天】\n- 总行程3天，目的地应在出发地3-4小时交通圈内，避免推荐需要大半天赶路的远距离城市。\n- 可以跨省但不宜跨多个省份。`;
+    }
   }
 
   const fixedDateBlock =
@@ -136,20 +310,245 @@ export function buildMultiPlanPrompt(
 
   const noteLongTripBlock =
     fixedDayCount != null && fixedDayCount > 7
-      ? `\n13. 用户行程较长（${fixedDayCount}天）：为控制篇幅，每天可只列 1–2 个活动，但 itinerary **必须恰好 ${fixedDayCount} 天**，不得少天、不得用「第3–5天合并」等偷懒写法。`
+      ? ` 用户行程较长（${fixedDayCount}天）：可压缩每条文字，但**每天 activities 条数仍须满足上文与节奏「${paceDesc}」对应的下限**；itinerary **必须恰好 ${fixedDayCount} 天**；禁止用「自由活动一整天」一条代替真实安排。`
       : '';
 
   const hotelWebBlock = opts?.hotelWebContext?.trim()
     ? `\n\n【联网检索 — 住宿相关公开信息摘要】\n以下内容来自网页检索，可能含游记、攻略、OTA 或评价聚合，**非实时房价与房态**。请批判性写入各方案 accommodations：名称尽量为真实可查的酒店/民宿；pros / cons 写可核对维度（位置、卫生、噪音、服务、交通、早餐等）；**禁止编造**具体星级评分或「官方认证」类不实表述。\n\n${opts.hotelWebContext.trim()}\n`
     : '';
 
+  const accomStyleGuide = accomStyleDesc
+    ? `\n用户已选择住宿风格偏好「${accomStyleDesc}」，请**重点推荐**符合该风格的住宿（如精品民宿、设计酒店、景观房、特色体验住宿等），而不是默认推荐如家、汉庭等连锁快捷酒店。若某目的地确实缺少对应风格选择，可保留1-2家品质连锁作为备选，但须在 webNote 中说明。`
+    : '';
   const hotelAccommodationRules = opts?.hotelWebContext?.trim()
-    ? '住宿：每个方案至少 **3 条** accommodations（可按城市/商圈拆分）。每项 name 必须是**具体可查的店名**（含品牌+城市/商圈/分店信息之一，如「全季南昌八一广场店」「陶溪川某某民宿」），**禁止**仅用「XX市内民宿」「经济型酒店」「景区旁住宿」等无店名占位。每项须含 pros（至少2条）、cons（至少1条）、webNote（写「据上文联网检索摘要归纳，仅供参考」并简述依据）；优劣势须能从检索摘要合理推出；不要输出 URL。'
-    : '住宿：每个方案至少 **3 条** accommodations。每项 name 必须是**具体可查的完整店名**（连锁品牌须写到分店/商圈层级，如「亚朵」「全季」「桔子」等+城市区域），**禁止**单独使用「民宿」「酒店」「住市区」等无名称表述。每项须含 pros（≥2）、cons（≥1）、webNote（常识推断、建议用户在 OTA 核实房价房态）；不要输出 URL。';
+    ? `住宿：每个方案至少 **3 条** accommodations（可按城市/商圈拆分）。每项 name 必须是**具体可查的店名**（含品牌+城市/商圈/分店信息之一，如「全季南昌八一广场店」「陶溪川某某民宿」），**禁止**仅用「XX市内民宿」「经济型酒店」「景区旁住宿」等无店名占位。每项须含 pros（至少2条）、cons（至少1条）、webNote（写「据上文联网检索摘要归纳，仅供参考」并简述依据）；优劣势须能从检索摘要合理推出；不要输出 URL。${accomStyleGuide}`
+    : `住宿：每个方案至少 **3 条** accommodations。每项 name 必须是**具体可查的完整店名**（连锁品牌须写到分店/商圈层级，如「亚朵」「全季」「桔子」等+城市区域），**禁止**单独使用「民宿」「酒店」「住市区」等无名称表述。每项须含 pros（≥2）、cons（≥1）、webNote（常识推断、建议用户在 OTA 核实房价房态）；不要输出 URL。${accomStyleGuide}`;
 
   const weatherBlock = opts?.weatherContext?.trim()
     ? `\n\n【目的地天气预报参考（Open-Meteo，与用户所见页面一致；预报有误差，出行前请再查）】\n${opts.weatherContext.trim()}\n- 撰写 recommendedSeason、各方案 tips 与行程 notes 时，须与上述气温区间、晴雨与降水概率**整体一致**，不要编造矛盾的天气描述。\n`
     : '';
+  const transportFoodBlock = opts?.transportFoodContext?.trim()
+    ? `\n\n【联网检索 — 交通与餐饮补充信息】\n以下内容来自预检索，可结合你自己的联网搜索能力获取更详细信息：\n\n${opts.transportFoodContext.trim()}\n`
+    : '';
+
+  const realDataBlock = opts?.realDataContext?.trim()
+    ? `\n\n【高德地图真实数据 — 必须优先使用】
+以下餐厅、酒店、景点、交通信息来自高德地图 API 实时查询，数据真实可靠。
+**你必须优先从以下数据中选取**来填写 itinerary、foodSpots、accommodations、attractions 等字段。
+- 餐厅：直接使用提供的店名、评分、人均价格
+- 酒店：直接使用提供的酒店名、价格
+- 景点：直接使用提供的景点名、类型
+- 交通：直接使用提供的路线方案（站名、耗时、费用）
+- **禁止编造**不在以下列表中的店名、车次、站名
+- 如果下方数据不够覆盖所有天数的安排，可以适当补充，但须注明"此处为AI推荐，建议出行前核实"
+
+${opts.realDataContext.trim()}
+`
+    : '';
+
+  // ===== Mountain Run: completely different prompt =====
+  if (isMountainRun) {
+    const mrDays = fixedDayCount ?? 1;
+    const mrIsMultiDay = mrDays > 1;
+    const mrDateLine = data.startDate
+      ? `- 日期：${data.startDate}${data.endDate ? ` 至 ${data.endDate}` : ''}，共${mrDays}天`
+      : `- 天数：${mrDays}天`;
+    const mrDestLine = data.destinations?.length
+      ? `- 用户指定方向：${data.destinations.join('、')}（在这个方向找山路）`
+      : '- 方向：由你推荐出发城市附近最经典的跑山路线';
+    const mrAccomNote = mrIsMultiDay
+      ? `多天跑山：每天跑不同的山路，晚上回镇上/县城住。住宿推荐山脚小镇的客栈或酒店（干净、方便停车即可），不需要豪华。accommodations 写${mrDays - 1}晚住宿。`
+      : '单日跑山：当天往返不需住宿，accommodations 为空数组。';
+    const mrItineraryNote = mrIsMultiDay
+      ? `每天安排一条不同的山路，天天都是"出发→跑山路→打卡→吃饭→回住处"的节奏。${mrDays}天可以跑${mrDays}条不同的山路，或同一座山不同方向。itinerary 恰好 ${mrDays} 天。`
+      : 'itinerary 只有1天。';
+
+    const isMoto = mountainRunVehicle === 'motorcycle';
+    const isCar = mountainRunVehicle === 'car';
+    const isBike = mountainRunVehicle === 'bicycle';
+
+    const vehicleLabel = isMoto ? '摩托车' : isCar ? '汽车' : '自行车';
+    const vehicleAction = isMoto ? '骑行' : isCar ? '驾驶' : '骑行';
+    const vehicleModelLabel = motoBikeType || '未提供';
+
+    const vehicleCoreDesc = isMoto
+      ? '跑山的核心是**骑摩托车走山路弯道**，享受压弯和骑行本身的乐趣。'
+      : isCar
+        ? '跑山的核心是**开车走山路弯道**，享受过弯、降挡补油和驾驶本身的乐趣。适合性能车、运动车、改装车爱好者。'
+        : '跑山的核心是**骑自行车爬山路**，享受爬坡挑战、下坡冲刺和骑行本身的乐趣。';
+
+    const vehicleDayDesc = isMoto
+      ? `1. 早上从住处出发，骑上山路
+2. 在弯道密集的路段尽情骑行，遇到好风景停下来拍照
+3. 到山顶/垭口/观景台短暂停留打卡
+4. 找山上或山脚的农家乐/饭店吃饭（这是跑山的重要环节！）
+5. 下午原路返回或走另一条山路回去`
+      : isCar
+        ? `1. 早上从住处出发，加满油上山路
+2. 在弯道密集的路段享受过弯、降挡补油，注意对向来车
+3. 到山顶/垭口/观景台停车拍照打卡
+4. 找山上或山脚的饭店吃饭（跑山必备环节！）
+5. 下午原路返回或绕另一条山路回去`
+        : `1. 早上从住处出发，检查车况补给饮水
+2. 开始爬坡，享受持续爬升带来的挑战
+3. 到山顶/垭口/制高点打卡拍照、休整补给
+4. 找山上或山脚的饭店吃饭补充体力
+5. 下午下山或走另一条路回去`;
+
+    const distanceNote = isMoto
+      ? '每天单程50-150公里为宜，当天骑行总里程不超过300公里'
+      : isCar
+        ? '每天单程50-200公里为宜，当天驾驶总里程不超过400公里'
+        : '每天总骑行30-100公里为宜（视爬升量而定），累计爬升500-2000米';
+
+    const routeCriteria = isMoto
+      ? '弯道密集、铺装良好、风景好、有海拔起伏的山路/盘山公路/国道省道'
+      : isCar
+        ? '弯道密集且路面宽（至少双车道）、铺装良好、风景好、有海拔起伏的盘山公路。注意避免路窄无法会车的路段'
+        : '坡度适中（5-12%为佳）、铺装良好、车流量小、风景好、有持续爬升的山路/盘山公路';
+
+    const searchKeyword = isMoto
+      ? `${data.departure} 摩托车跑山路线推荐`
+      : isCar
+        ? `${data.departure} 汽车跑山自驾山路推荐`
+        : `${data.departure} 公路车爬坡骑行路线推荐`;
+
+    const refRoutes = isMoto
+      ? `  北京：妙峰山/红井路十八盘/百花山/仓米古道/琉辛路/灵山盘山路
+  杭州：漕雅线/天荒坪/大鱼线；重庆：歌乐山/南山
+  广东：从化溪头村线/南昆山；成都：龙泉山/蒲虹路`
+      : isCar
+        ? `  北京：红井路十八盘/百花山/妙峰山/幽州大峡谷
+  杭州：天荒坪/大鱼线/莫干山；重庆：歌乐山/南山/武隆仙女山
+  广东：南昆山/丹霞山；成都：龙泉山/蒲虹路/巴朗山`
+        : `  北京：妙峰山/门头沟潭王路/百花山/红井路
+  杭州：天荒坪/大鱼线/灵隐-梅家坞-龙井爬坡；重庆：歌乐山/照母山
+  广东：从化吕田/南昆山；成都：龙泉山/蒲虹路`;
+
+    const notesGuide = isMoto
+      ? '弯道类型（C弯/发卡弯/盲弯等）、路面状况、海拔变化等骑行相关信息'
+      : isCar
+        ? '弯道类型（C弯/发卡弯/U弯等）、路面宽度、海拔变化、会车难度、停车观景点'
+        : '坡度/爬升量、路面状况、补给点（小卖部/水源）、下坡注意事项';
+
+    const tipsGuide = isMoto
+      ? '弯道安全（入弯减速/不越线/盲弯鸣笛）和装备提醒（全盔/护具/手套/骑行靴）'
+      : isCar
+        ? '弯道安全（入弯减速/不越线/盲弯鸣笛/注意对向来车）和车辆检查提醒（刹车/轮胎/油液）'
+        : '骑行安全（下坡控速/弯道靠右/佩戴头盔）和补给提醒（水/能量胶/备胎工具）';
+
+    const vehicleCheckNote = isMoto
+      ? '检查胎压刹车链条，加满油出发'
+      : isCar
+        ? '检查胎压刹车油液，加满油出发'
+        : '检查胎压变速刹车，带足饮水和补给出发';
+
+    const returnTripGuide = `
+【返程规划 — 非常重要，不能遗漏！】
+跑山行程必须包含返程！用户需要回到出发地。请在 activities 最后安排返程：
+- 返程方式A（推荐给一日游）：走高速/快速路直接回城，注明"跑了一天山路比较累，建议走高速返回，约X小时"
+- 返程方式B：原路返回，再跑一遍山路弯道
+- 返程方式C：走另一条不同的山路/国道回去
+你需要**选择一种最合理的返程方式**，并在 activities 里写出返程活动（location 填返程途经的镇/收费站/出发城市），确保最后一条 activity 的 location 回到出发城市或其市区。
+transportDetail 也必须写清返程走法和预计到家时间。`;
+
+    return `请为我推荐**${vehicleLabel}跑山路线**。
+
+【跑山模式 — 核心理解（非常重要）】
+跑山 ≠ 旅行 ≠ 普通旅游。${vehicleCoreDesc}
+
+跑山的完整一天是这样的（包含返程！）：
+${vehicleDayDesc}
+6. 返程回城（走高速快速回家，或原路/另一条路慢慢骑/开回去）
+7. 傍晚回到出发城市
+
+**跑山不需要火车/飞机/高铁信息。不需要逛景点逛街购物。不需要详细游览攻略。**
+核心输出：**山路路线（去程+返程）、弯道描述、沿途风景打卡点、吃饭的地方。**
+
+基本信息：
+- 出发城市：${data.departure}
+- ${isBike ? '车型' : '车型/排量'}：${vehicleModelLabel}
+${mrDateLine}
+${mrDestLine}
+${p.mustVisit ? `- 想去的方向：${p.mustVisit}` : ''}
+${p.mustAvoid ? `- 不想去的：${p.mustAvoid}` : ''}
+
+【选线标准】
+- ${distanceNote}
+- 优先选：${routeCriteria}
+- 知名跑山路线参考（仅供灵感，你必须根据出发城市自行推荐，不要总是推荐同一条路）：
+${refRoutes}
+- 不在以上列表的城市，请联网搜索"${searchKeyword}"
+${returnTripGuide}
+
+【${mrIsMultiDay ? '多天' : '单日'}跑山规则】
+${mrItineraryNote}
+${mrAccomNote}
+
+【多样性要求 — 必须遵守】
+- **每次生成都必须推荐不同的路线**，不要重复上次的路线
+- 从出发城市附近多条可选山路中**随机选一条**推荐，不要总是推荐最知名的那条
+- 如果出发城市附近有5条以上可选山路，请随机挑选，给用户新鲜感
+
+【地理准确性 — 严禁胡编】
+- 只推荐你确认存在的真实山路，弯道描述必须对应该路线的实际情况
+- **不同山路的特征不能混淆**：例如红井路的发卡弯只出现在红井路上，不能写在仓米古道的描述里
+- 不确定的路线信息请联网搜索验证，不要编造弯道数量、海拔数据
+- 沿途餐馆推荐必须在该路线沿线，不能把其他路线附近的餐馆张冠李戴
+
+请严格按以下JSON格式返回（不要任何额外文字）：
+
+{
+  "recommendedRoute": "推荐路线总览，包含去程和返程",
+  "recommendedDays": ${mrDays},
+  "recommendedSeason": "当前季节跑山提醒（气温、路面、起雾等）",
+  "nearbySuggestions": "同城市其他可跑的山路推荐（2-3条备选线路名+特点，与本次推荐的不同）",
+  "plans": [
+    {
+      "planName": "XX跑山${mrDays > 1 ? mrDays + '日' : '一日'}${vehicleAction}",
+      "planDescription": "一句话概括（含总里程和预计时长）",
+      "transportDetail": "去程：完整路线走法、里程、${vehicleAction}时间、重点弯道路段${isBike ? '、爬升量、补给点' : '、加油站'}。返程：走哪条路回去、里程、预计到家时间。",
+      "itinerary": [
+        {
+          "day": 1,
+          "date": "${data.startDate || 'Day 1'}",
+          "theme": "XX山路跑山",
+          "activities": [
+            {"time": "08:00", "activity": "出发准备", "location": "${data.departure}", "duration": "30分钟", "cost": 0, "notes": "${vehicleCheckNote}"},
+            {"time": "...", "activity": "${vehicleAction}上山（去程山路段）", "location": "途经的具体村镇名", "duration": "...", "cost": 0, "notes": "该路段实际弯道特征..."},
+            {"time": "...", "activity": "山顶/垭口打卡", "location": "具体景区或山顶地名", "duration": "...", "cost": 0, "notes": "..."},
+            {"time": "...", "activity": "午餐", "location": "沿途具体村镇", "duration": "1小时", "cost": 80, "foodRecommendation": {"shopName": "真实店名", "rating": 4.5, "specialty": "招牌菜", "reason": "推荐理由"}},
+            {"time": "...", "activity": "返程", "location": "返程途经的村镇或高速入口", "duration": "...", "cost": 0, "notes": "返程走法：走XX高速/原路返回/走XX路返回，预计X点到家"},
+            {"time": "...", "activity": "到家", "location": "${data.departure}", "duration": "-", "cost": 0, "notes": "全天结束，总${vehicleAction}里程约XXkm"}
+          ]
+        }
+      ],
+      "attractions": [
+        {"name": "路线亮点/打卡点", "description": "为什么值得停", "category": "观景点", "duration": "10-30分钟", "cost": 0}
+      ],
+      "accommodations": [${mrIsMultiDay ? '{"name": "山脚镇上客栈/酒店", "type": "客栈", "pricePerNight": 200, "area": "XX镇", "highlights": "停车方便", "pros": ["位置方便"], "cons": ["设施一般"], "webNote": "建议出行前核实"}' : ''}],
+      "foodSpots": [
+        {"name": "真实饭店名", "type": "农家乐", "avgCost": 50, "specialty": "推荐菜", "area": "该路线沿线具体位置"}
+      ],
+      "costBreakdown": {"transport": 50, "accommodation": 0, "food": 100, "attractions": 0, "other": 0, "total": 150},
+      "tips": ["弯道安全提醒", "山区天气提醒", "${isBike ? '补给和体力分配' : '车况检查'}"]
+    }
+  ]
+}
+
+注意：
+1. **跑山行程的核心是${vehicleAction}本身**，activities 围绕"出发→${vehicleAction}上山→打卡→吃饭→返程→到家"展开
+2. **activities 必须包含返程和到家**，最后一条 activity 的 location 必须是出发城市（${data.departure}），让用户知道几点能到家
+3. foodSpots 至少 4 家该路线沿途的农家乐/饭店，写真实可查的店名和招牌菜
+4. attractions 改为"路线亮点"：弯道名段、观景台、垭口、打卡点，至少 4 个
+5. transportDetail 写清去程和返程的完整走法、里程${isBike ? '、爬升量、补给点' : '、加油站'}
+6. tips 必须包含${tipsGuide}
+7. **绝对不要出现火车、飞机、高铁、12306等信息**
+8. 所有费用是${data.peopleCount}人的总费用（人民币元）
+9. 每条 activity 的 notes 写${notesGuide}
+10. **location 字段极其重要**：必须填**具体可在地图上搜到的地名**（村镇名、景区名、山峰名），**绝对不能**填路线名、路段编号、"XX路→XX路"。路线走法写在 notes 和 transportDetail 里。
+11. **弯道/路况描述必须对应该条路线的真实情况**，不同路线的特征不能混用`;
+  }
 
   return `请为我制定一份旅行规划。
 
@@ -164,8 +563,23 @@ export function buildMultiPlanPrompt(
 - 任意相邻两天的住宿城市若跨省变化，transportDetail 与当日活动须交代**如何转场**（铁路车次类型、大致耗时），与地图逻辑一致。
 - 若用户输入的地名疑似笔误（如「坞镇」与「乌镇」），在 recommendedRoute 或 planDescription 中**澄清你采用的正确地名**，并按真实地理位置排程。
 
+【联网搜索能力 — 充分利用（极其重要）】
+- 你已开启联网搜索，请**主动搜索**以下来源获取真实数据：
+  1. **大众点评 / 美团**：搜索目的地城市高评分餐厅，获取真实店名、评分、招牌菜、人均价格，填入 foodRecommendation 和 foodSpots。
+  2. **小红书 / 马蜂窝 / 携程攻略**：搜索目的地热门景点、打卡地、真实游客体验，让推荐更贴合实际。
+  3. **酒店预订平台**：搜索真实酒店名称、价格区间、用户评价，填入 accommodations 和 stayInfo。
+
+【铁路信息 — 站名准确，车次留空】
+- 你**无法**可靠查询 12306 车次数据，**严禁编造**车次号（如 G1234）、精确发车/到达时刻、精确票价。
+- transportInfo 中：**trainNo 留空或省略**；**departTime / arriveTime 留空或省略**；**duration** 写大致区间（如"约1～2小时"）；**priceNote** 写"请在12306查询"。
+- **fromStation / toStation** 必须填写**真实存在的常见客运站名**。例如北京往张家口走京张高铁，发站为清河站或北京北站，不要写北京西站。
+- transportDetail 须提醒用户在 12306 查询具体车次与票价。
+
 【行程字段 — 禁止残缺】
 - itinerary 里每条 activities 的 **time、activity、location、duration** 必须是**非空的中文字符串**（可含数字与符号）；**禁止**输出 undefined、null、英文 undefined、空字符串或 JSON 非法占位。
+- 若活动是「跨城交通段」，请补充 transportInfo：fromStation、toStation（真实站名）、duration（大致区间）、priceNote（写"请在12306查询"）。**不要填 trainNo、departTime、arriveTime**，因为你无法可靠获取这些数据。
+- 若活动是「入住酒店」，请补充 stayInfo（hotelName, pricePerNight，注意是每晚价格）。
+- 若活动是「餐饮」类，请补充 foodRecommendation（shopName/rating/specialty/reason），优先高评分口碑店。
 - notes 可省略；若写则同样须为正常中文短句。若已有天气参考，请优先在 notes 加一句当日「穿衣/雨具」建议（如“早晚加外套、建议带折叠伞”）。
 - tips 数组**至少 2 条**有用中文贴士（天气、预约、交通、安全、饮食等），不得留空数组。
 
@@ -173,7 +587,7 @@ export function buildMultiPlanPrompt(
 - 出发地：${data.departure}
 ${destinationLine}
 ${dateSection}
-${fixedDateBlock}
+${fixedDateBlock}${durationConstraint}
 - 出行人数：${data.peopleCount}人
 - 同行人：${companion}${childInfo}
 - 偏好的出行方式：${transports}
@@ -181,12 +595,21 @@ ${fixedDateBlock}
 偏好设置：
 - 旅行节奏：${paceDesc}
 ${interestLine}
-- 住宿偏好：${accom}
+- 住宿档次：${accom}${accomStyleDesc ? `\n- 住宿风格偏好：${accomStyleDesc}（请据此优先推荐符合风格的住宿，而非普通连锁快捷酒店）` : ''}
 ${foodLine}${dietaryNote}
 - 预算水平：${budgetDesc}（人均每天）
 - 每天出发时间：${wakeUp}${mustVisit}${mustAvoid}${specialNeeds}
-${hotelWebBlock}${weatherBlock}
+${mustAvoidHardRules}
+${realDataBlock}${hotelWebBlock}${weatherBlock}${transportFoodBlock}
 ${planCountText}
+${productCoreBlock}
+
+【输出精简要求 — 严格遵守，否则 JSON 会被截断导致方案不完整！】
+- tips 控制在 3 条
+- location、notes 简洁（10-20字）
+- accommodations 每项只写 name、pricePerNight、area、pros（1条）、cons（1条）
+- food_spots 每项只写 name、cuisine、priceRange、rating
+${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）**：每天 activities 严格 **2-3 条**（上午+下午+可选晚间），描述从简。**宁可每天少一条活动，也绝对不能漏掉任何一天！全部 ${fixedDayCount} 天必须写完。**` : fixedDayCount && fixedDayCount > 5 ? `- **中等行程（${fixedDayCount}天）**：每天 activities 控制在 **3-4 条**，描述从简。` : `- 每天 activities 3-5 条`}
 
 请严格按以下JSON格式返回（不要任何额外文字）：
 
@@ -206,14 +629,9 @@ ${planCountText}
           "date": "${jsonDateFieldExample}",
           "theme": "当天主题",
           "activities": [
-            {
-              "time": "10:00",
-              "activity": "活动名称",
-              "location": "地点",
-              "duration": "约2小时",
-              "cost": 0,
-              "notes": "备注"
-            }
+            {"time": "上午出发", "activity": "乘高铁前往南昌", "location": "北京西站→南昌西站", "duration": "约4～5小时", "cost": 0, "notes": "建议提前在12306查询车次并购票", "transportInfo": {"fromStation": "北京西站", "toStation": "南昌西站", "duration": "约4～5小时", "priceNote": "请在12306查询具体车次与票价"}},
+            {"time": "16:00", "activity": "入住酒店并休整", "location": "八一广场", "duration": "约1小时", "cost": 0, "stayInfo": {"hotelName": "全季南昌八一广场店", "pricePerNight": 360}},
+            {"time": "19:00", "activity": "晚餐探店", "location": "万寿宫历史文化街区", "duration": "约1.5小时", "cost": 120, "foodRecommendation": {"shopName": "邓氏瓦罐汤（万寿宫店）", "rating": 4.7, "specialty": "招牌瓦罐汤/南昌拌粉", "reason": "大众点评高分老店，本地人常去，汤底浓郁"}}
           ]
         }
       ],
@@ -271,9 +689,10 @@ ${noteRecommendedDaysLine}
 8. ${fixedDayCount != null ? 'itinerary 每项的 date 为真实公历日期；theme 仍写当天主题' : 'date 字段用 "Day 1", "Day 2" 这样的格式'}
 9. 顶层必须包含 nearbySuggestions 字符串字段。${fixedDayCount != null ? '固定日期下须按上文详写顺路/半日周边玩法。' : '日期未固定时可填空字符串，或简要写出若采用某路线时的顺路可玩点。'}
 10. ${hotelAccommodationRules}
-11. ${outputLimitText}${motorcycleGuide}
-12. attractions 不能过少：固定日期时至少给出 min(${fixedDayCount ?? 6}, 10) 个「可玩的景点/体验去处」；非固定日期至少 6 个，避免只写交通与入住。
-13. 严格遵守上文「地理与交通」「行程字段」；若输出被截断导致字段缺失，应优先保证每日 activities 四项字符串完整、tips 至少 2 条${noteLongTripBlock}`;
+11. ${outputLimitText}${selfDriveGuide}${motorcycleGuide}
+12. attractions 清单须饱满：固定日期时至少 **${fixedDayCount != null ? Math.min(Math.max(fixedDayCount * 2, 10), 36) : 10}** 个「景点/体验/街区/观景点」条目，并与 itinerary 中实际游玩内容对应；非固定日期至少 10 个。
+13. 若用户填写了「不想去的地方」：attractions 与 itinerary 均不得出现与用户否决项冲突的内容（例如用户拒绝博物馆时，不得出现博物馆/美术馆/室内展览类推荐）。
+14. 严格遵守上文「地理与交通」「行程字段」；若输出被截断导致字段缺失，应优先保证**每日 activities 条数与时段覆盖**、四项字符串完整、tips 至少 2 条${noteLongTripBlock}`;
 }
 
 export function buildPlanEditPrompt(args: {
@@ -284,6 +703,7 @@ export function buildPlanEditPrompt(args: {
     date_mode?: string;
     start_date?: string;
     end_date?: string;
+    preferences?: { mustAvoid?: string; mustVisit?: string; specialNeeds?: string };
   };
   recommendations?: {
     route?: string;
@@ -309,19 +729,75 @@ export function buildPlanEditPrompt(args: {
   const daysLabel = trip.date_mode === 'fixed' ? '行程天数（与用户日期一致）' : '推荐天数';
   const seasonLabel = trip.date_mode === 'fixed' ? '选定时段出行提示（勿建议改期）' : '推荐季节/时段';
 
-  return `你是旅行规划编辑助手。你的任务是基于“当前方案”按用户新要求进行局部修改。
+  const mustAvoid = trip.preferences?.mustAvoid?.trim();
+  const mustAvoidEditBlock = mustAvoid
+    ? `
+【用户长期否决项（生成阶段已声明，仍须遵守）】
+- ${mustAvoid}
+- 若含「不去任何博物馆」等：禁止在 itinerary/attractions/tips 中出现博物馆、博物院、纪念馆、美术馆、艺术馆、室内展览/看展类安排；不得以换表述绕过。
+`
+    : '';
 
-要求：
-1. 尽量局部改动，只改和用户指令相关的内容，未提及部分保持不变
-2. 保持输出结构稳定，字段完整
+  return `你是一位专业、友善的旅行规划助手。用户正在和你讨论一份已生成的旅行方案。你既可以帮他调整方案，也可以单纯聊天、回答问题、给建议。
+
+**核心原则：区分"聊天"和"指令"。用户聊天时陪他聊，用户下指令时立刻执行。**
+
+什么时候【只回复，不改方案】（planModified 设为 false，updatedPlan 设为 null）：
+- 用户在纯粹提问，不涉及修改（如"庐山值得去吗""高铁大概多少钱""这个季节冷不冷"）
+- 用户在表达感受但没有明确要改什么（如"感觉行程有点赶""好像挺累的"）→ 你可以追问"要不要帮你调整一下节奏？哪天想轻松点？"
+- 用户在犹豫、对比、没拿定主意（如"A和B你觉得哪个好""我在想要不要去那里"）
+- 此时 assistantMessage 要像朋友一样自然回复，可以给建议、追问细节
+
+什么时候【修改方案】（planModified 设为 true，updatedPlan 返回完整修改后的方案）：
+- 用户要求增加/减少/替换/调整内容（如"多推荐几个酒店""换成夜景""加个景点""去掉博物馆""住宿多给几个选择"）
+- 用户指定了具体的修改方向（如"第一天住宿多推荐几个""预算降到5000""第2天轻松一点"）
+- 用户确认了你之前的建议（如"好的就按你说的改""行就这样吧""可以"）
+- 用户表达了否定/拒绝某部分行程（如"北京的不去""我不想去那里""第三天不要了""XX我不去"）→ 这也是指令，立刻执行删除/替换！
+- 用户用了这些**动作词**中的任何一个 → 当作指令，直接执行修改：
+  "多推荐""换成""改成""加上""去掉""删掉""不要""不去""不想去""不想住""取消""拿掉""砍掉""缩短""延长""提前""推迟""便宜点""贵一点""升级""降级"
+- **注意："多推荐几个"="帮我推荐更多"，是明确指令，必须立刻修改方案，不要反问！**
+
+拿不准时的判断方法：用户的话里有没有"动作词"（见上面列表）？
+- 有动作词 → 当指令执行，改方案，**不要追问"你想换成什么"**
+- 没有动作词，只是表达感受或提问 → 先聊
+
+【用户说得模糊怎么办？】
+- 用户说"不想在XX玩""换成其他地方""改一下"但没说具体换什么 → **你自己决定替换成什么！** 根据出发地、行程天数、用户偏好，推荐合理的替代方案，直接执行修改。**绝对不要反问"你想换成哪里"，用户是来让你帮忙做决定的，不是来被追问的。**
+
+【"不想在XX玩"＝彻底移除整个行政区，不留一天！】
+- 当用户说"不想在XX玩""XX不去了""把XX去掉"时，意思是**完全不要在该城市整个行政区范围内有任何观光活动**。
+- "不想在XX玩"中的 XX 指的是**整个行政区划**，包括该城市的所有区县、郊区、卫星城、以及位于这些区域内的所有景点。
+- **北京市的行政区划包括**：东城、西城、朝阳、海淀、丰台、石景山、通州、顺义、房山、大兴、昌平、怀柔、平谷、密云、延庆、门头沟。"不想在北京玩"＝以上所有区域及其中的景点全部不去！
+- **以下热门景点全部属于北京市，说"不想在北京玩"时必须全部移除**：古北水镇（密云区）、八达岭长城（延庆区）、慕田峪长城（怀柔区）、十三陵（昌平区）、奥林匹克森林公园（朝阳区）、颐和园（海淀区）、故宫（东城区）、天坛（东城区）、北海公园（西城区）、香山（海淀区）、雁栖湖（怀柔区）、龙庆峡（延庆区）、金海湖（平谷区）等。
+- 你必须把 itinerary 中所有在该行政区范围内的天全部替换为**该行政区之外**的其他城市。**一天都不能留！包括用 _keep:true 保留的天也要检查，如果原来那天是在被移除的城市，就不能 _keep，必须替换！**
+- 仅允许保留出发日的"从XX出发前往…"和返程日的"返回XX"两个交通动作（且该天不能有任何在该城市的景点/游览/休闲活动）。
+- 替代城市必须在**该城市行政区之外**。例如"不想在北京玩"→ 可推荐天津、廊坊、保定、承德、张家口、秦皇岛、唐山、燕郊（河北三河市）等。昌平、密云、延庆、怀柔等属于北京市，**绝对不可以推荐**。古北水镇属于密云区（北京），也不可以。
+- 长行程替代城市要足够多且有深度（如天津3-4天、承德3天、秦皇岛2-3天、保定2天等），不要出现连续多天"返程准备"这种空洞安排。
+- 替换后重新规划交通衔接，确保行程地理顺序合理。
+
+【防矛盾规则】：如果你在 assistantMessage 里说"帮你去掉了""已经换了""调整好了"等已完成的措辞，planModified **必须**为 true 且 updatedPlan 包含修改后的方案。绝对不允许嘴上说改了但 planModified 为 false。
+
+修改方案时的要求：
+1. **增量输出**：itinerary 数组中，**未修改的天只写 { "day": N, "_keep": true }**，只有真正改动过的天才写完整内容。这非常重要，可以大幅减少输出量！例如14天方案只改了第1、7、14天，itinerary 应该是：[{ "day": 1, ...完整内容 }, { "day": 2, "_keep": true }, ..., { "day": 7, ...完整内容 }, ..., { "day": 14, ...完整内容 }]
+   - **例外**：如果用户要求**重新排列城市顺序/调整每城天数分配**，则**所有天都必须输出完整内容**（不能用 _keep），因为每天对应的城市都变了
+2. 只改和用户指令相关的内容，未提及部分保持不变
 3. 修改后给出简要变更说明（changeSummary）
-4. 如果用户要求模糊，做合理假设并在assistantMessage中说明
-5. 若用户提到「换顺序」「先去哪里」「路线不合理」等：你应重新优化游览/交通顺序（不是按用户随口列举顺序），并同步调整 transportDetail 与 itinerary 地理逻辑
+4. assistantMessage 用自然口语回复，像朋友一样说话，不要机械化（如"好嘞，帮你换了几家有格调的民宿，你看看喜不喜欢～"）
+5. 若用户提到「换顺序」「先去哪里」「路线不合理」或指定了城市游览顺序和天数分配：
+   - 如果用户**明确指定了顺序和每城天数**（如"先去A呆1天再去B呆2天最后去C"），必须**严格按用户指定的顺序和天数执行**，不要自作主张"优化"
+   - 如果用户只是说"路线不合理""帮我调一下顺序"但没指定具体顺序，你再根据地理逻辑优化
+   - 重排顺序时**所有天都必须输出完整内容，禁止用 _keep:true**，因为每天对应的城市和活动都变了
+   - 同步调整 transportDetail 与城市间交通衔接
 6. 若用户提到「周边」「顺路多玩」：在总天数与返程日不变前提下，可把半日周边安排写进 itinerary 的 notes 或替换当日较轻的活动
 7. 若涉及住宿调整：每项保留 pros、cons、webNote；联网场景下 webNote 须体现「据检索摘要归纳」
 8. 地理与交通须符合常识（如江西景德镇至浙江乌镇应写高铁经杭州/上海等枢纽中转及合理耗时，禁止「大巴2–3小时直达」）；itinerary 每条 activities 的 time、activity、location、duration 须为非空中文字符串，禁止 undefined/null 字面；tips 至少 2 条中文
-9. 若用户要求“更直观价格”：住宿名称后可直接带价格（如「全季XX店（约¥320/晚）」）；若有天气信息，相关天的 notes 增加一句穿衣/雨具建议
-
+9. 若当前方案「每天 activities 过少、下午或晚间空白」：在总天数与返程日不变前提下，按**上午+下午+晚间**补齐可执行安排（除非用户明确要求极简）
+10. 若用户要求"更直观价格"：住宿名称后可直接带价格（如「全季XX店（约¥320/晚）」）；若有天气信息，相关天的 notes 增加一句穿衣/雨具建议
+11. 若当前活动已有 transportInfo/stayInfo/foodRecommendation 等结构化字段，除非用户明确要求删除，否则应保留并按新需求更新
+12. 修改后须清除与用户否决项冲突的内容（例如用户拒绝博物馆却仍出现「某某博物馆」时应删除并替换为合规活动）
+13. 铁路段：transportInfo 只填真实站名、大致耗时、"请在12306查询"；**不要填 trainNo/departTime/arriveTime**。
+14. **costBreakdown 必须与修改后的内容一致**：任何涉及预算调整、住宿升级/降级、增减活动等改动，都必须同步重新计算 costBreakdown 中各项金额和 total。绝对不能照搬旧方案的费用数字。即使用户没提"费用"二字，只要行程内容变了（比如换了更贵的酒店、加了景点门票），费用也要跟着变。
+${mustAvoidEditBlock}
 行程背景：
 - 出发地：${trip.departure}
 - 用户想去的地方（集合，顺序以方案为准）：${trip.destinations.length ? trip.destinations.join('、') : '由当前方案中的目的地决定'}
@@ -331,19 +807,30 @@ export function buildPlanEditPrompt(args: {
 - ${seasonLabel}：${recommendations?.season || '无'}
 - 周边备选参考：${recommendations?.nearbySuggestions || '无'}
 
-当前方案（JSON）：
-${JSON.stringify(currentPlan, null, 2)}
+当前方案（JSON，紧凑格式）：
+${JSON.stringify(currentPlan)}
 
 近期对话：
 ${historyText || '无'}
 
-用户这次的新要求：
+用户这次说的话：
 ${userInstruction}
 
 请严格返回以下 JSON（不要任何额外文字）：
+
+如果你认为这次**不需要修改方案**（只是聊天/回答问题/讨论想法），返回：
 {
-  "assistantMessage": "给用户的简短回复，说明你已做了什么调整",
-  "changeSummary": "用一句话总结本次修改（如：将第2天改为轻松节奏并把预算降低约15%）",
+  "planModified": false,
+  "assistantMessage": "你的自然语言回复（像朋友聊天一样，可以提问、建议、讨论）",
+  "changeSummary": null,
+  "updatedPlan": null
+}
+
+如果你认为这次**需要修改方案**，返回：
+{
+  "planModified": true,
+  "assistantMessage": "简短说明你做了什么调整（自然口语风格）",
+  "changeSummary": "一句话总结本次修改",
   "updatedPlan": {
     "planName": "方案名",
     "planDescription": "方案描述",

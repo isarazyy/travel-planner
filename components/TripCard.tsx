@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Trip, MODE_ICONS } from '@/lib/types';
+import { Trip, modeDisplayLabel, modeIcon } from '@/lib/types';
 
 export default function TripCard({ trip, onDelete }: { trip: Trip; onDelete: (id: string) => void }) {
   const plans = trip.trip_plans || [];
@@ -25,7 +25,7 @@ export default function TripCard({ trip, onDelete }: { trip: Trip; onDelete: (id
         </div>
         <button
           onClick={(e) => { e.preventDefault(); onDelete(trip.id); }}
-          className="text-gray-300 hover:text-red-400 transition opacity-0 group-hover:opacity-100"
+          className="text-gray-400 hover:text-red-500 transition"
           title="删除"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -36,9 +36,9 @@ export default function TripCard({ trip, onDelete }: { trip: Trip; onDelete: (id
 
       {/* Mode badges */}
       <div className="flex flex-wrap gap-2 mb-3">
-        {plans.map(p => (
-          <span key={p.mode} className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded-md">
-            {MODE_ICONS[p.mode]} ¥{(p.estimated_total || 0).toLocaleString()}
+        {plans.map((p, i) => (
+          <span key={p.id || `${p.mode}-${i}`} className="text-xs bg-gray-50 text-gray-600 px-2 py-1 rounded-md">
+            {modeIcon(p.mode)} ¥{(p.estimated_total || 0).toLocaleString()}
           </span>
         ))}
       </div>

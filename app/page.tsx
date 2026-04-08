@@ -1,7 +1,7 @@
 import Link from 'next/link';
 
 const FEATURES = [
-  { icon: '🎯', title: '9步深度定制', desc: '从同行人到预算，全方位个性化你的旅行' },
+  { icon: '🎯', title: '5步深度定制', desc: '从同行人到预算，全方位个性化你的旅行' },
   { icon: '🤖', title: 'AI智能规划', desc: '通义千问大模型为你量身生成行程方案' },
   { icon: '🔄', title: '多方案对比', desc: '穷游、自驾、高铁、飞机一键对比费用' },
   { icon: '📱', title: '随时查看', desc: '所有行程自动保存，手机电脑随时访问' },
@@ -34,16 +34,16 @@ export default function Home() {
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <Link
-              href="/plan"
+              href="/plan?quick=1"
               className="px-8 py-4 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl shadow-lg shadow-orange-200 transition text-lg"
             >
-              开始规划旅行 →
+              ⚡ 快速生成方案
             </Link>
             <Link
-              href="/history"
+              href="/plan"
               className="px-8 py-4 bg-white hover:bg-gray-50 text-gray-700 font-medium rounded-xl border border-gray-200 transition"
             >
-              查看历史行程
+              🎯 详细定制 →
             </Link>
           </div>
         </div>

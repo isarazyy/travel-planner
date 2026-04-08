@@ -1,6 +1,6 @@
 /**
  * SSE streaming helper — keeps long-running API responses alive so reverse
- * proxies (Cloudflare tunnel, ngrok …) don't 524 while we wait for the LLM.
+ * proxies with short idle timeouts don't drop the connection while we wait for the LLM.
  *
  * Protocol:
  *   event: ping\ndata: {}\n\n          ← heartbeat every PING_INTERVAL_MS
@@ -41,7 +41,16 @@ export function streamWithKeepAlive<T>(
         );
       } catch (err: any) {
         clearInterval(pingTimer);
-        const payload = { error: err?.message || '生成失败' };
+        const raw = String(err?.message || '生成失败');
+        let friendly = raw;
+        if (/position \d+|JSON|Unexpected token|Expected/.test(raw)) {
+          friendly = 'AI 返回的数据不完整，请重试一次（建议选择"极速"模式）';
+        } else if (/超时|timeout|Abort/i.test(raw)) {
+          friendly = '生成时间较长导致超时，请重试';
+        } else if (/API error 4/i.test(raw)) {
+          friendly = 'AI 服务调用失败，请检查额度或稍后重试';
+        }
+        const payload = { error: friendly };
         controller.enqueue(
           encoder.encode(sseChunk('error', JSON.stringify(payload))),
         );

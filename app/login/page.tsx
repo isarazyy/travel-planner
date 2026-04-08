@@ -1,7 +1,7 @@
 'use client';
 
 import { Suspense, useState } from 'react';
-import { createClient, isConfigured } from '@/lib/supabase-browser';
+import { isConfigured } from '@/lib/supabase-browser';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
@@ -12,48 +12,55 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get('redirect') || '/';
+  const redirect = searchParams.get('returnTo') || searchParams.get('redirect') || '/';
+  const justRegistered = searchParams.get('registered') === '1';
+
+  const skipTarget = redirect && redirect !== '/login' ? redirect : '/plan';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    const supabase = createClient();
-    if (!supabase) {
-      setError('Supabase 未配置：本地请改 .env.local；线上请在 Vercel → Settings → Environment Variables 添加 NEXT_PUBLIC_SUPABASE_URL 与 NEXT_PUBLIC_SUPABASE_ANON_KEY 后重新部署');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || '登录失败');
+        setLoading(false);
+        return;
+      }
+
+      router.push(redirect);
+      router.refresh();
+    } catch {
+      setError('网络错误，请稍后重试');
       setLoading(false);
-      return;
     }
-
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-
-    if (error) {
-      setError(error.message === 'Invalid login credentials' ? '邮箱或密码错误' : error.message);
-      setLoading(false);
-      return;
-    }
-
-    router.push(redirect);
-    router.refresh();
   }
 
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-5">
       {!isConfigured && (
-        <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm space-y-2">
-          <p>⚠️ Supabase 尚未配置，登录/注册不可用。</p>
-          <ul className="list-disc pl-4 text-xs space-y-1">
-            <li>
-              <strong>本地开发：</strong>在项目根目录 <code className="bg-amber-100 px-1 rounded">.env.local</code> 填写{' '}
-              <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_URL</code> 与{' '}
-              <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
-            </li>
-            <li>
-              <strong>线上（Vercel）：</strong>打开项目 → Settings → Environment Variables → 添加上述两项（Production）→ Redeploy
-            </li>
-          </ul>
-          <p className="text-xs">在 Supabase 控制台：Project Settings → API 可复制 URL 与 anon public key。</p>
+        <div className="rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50/80 p-4 space-y-3">
+          <p className="text-sm font-medium text-gray-900">当前未连接账号系统</p>
+          <Link
+            href={skipTarget}
+            className="flex w-full items-center justify-center py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold transition"
+          >
+            暂不登录，直接使用 →
+          </Link>
+        </div>
+      )}
+
+      {justRegistered && (
+        <div className="bg-emerald-50 text-emerald-800 px-4 py-3 rounded-lg text-sm border border-emerald-100">
+          注册成功！请用刚才的邮箱和密码登录。
         </div>
       )}
 
@@ -94,12 +101,17 @@ function LoginForm() {
         {loading ? '登录中...' : '登录'}
       </button>
 
-      <p className="text-center text-sm text-gray-500">
-        还没有账户？{' '}
-        <Link href="/register" className="text-orange-500 hover:text-orange-600 font-medium">
-          注册
+      <div className="flex items-center justify-between text-sm">
+        <p className="text-gray-500">
+          没有账户？{' '}
+          <Link href="/register" className="text-orange-500 hover:text-orange-600 font-medium">
+            注册
+          </Link>
+        </p>
+        <Link href={skipTarget} className="text-gray-400 hover:text-gray-600">
+          跳过登录 →
         </Link>
-      </p>
+      </div>
     </form>
   );
 }

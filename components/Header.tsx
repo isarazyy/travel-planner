@@ -3,10 +3,11 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
-import { createClient } from '@/lib/supabase-browser';
+import { createClient, isConfigured as supabaseConfigured } from '@/lib/supabase-browser';
 
 export default function Header() {
   const [user, setUser] = useState<{ email?: string } | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
@@ -14,7 +15,14 @@ export default function Header() {
   useEffect(() => {
     const supabase = createClient();
     if (!supabase) return;
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      if (data.user?.email) {
+        fetch('/api/admin/users', { method: 'GET' })
+          .then((r) => setIsAdmin(r.ok))
+          .catch(() => setIsAdmin(false));
+      }
+    });
   }, [pathname]);
 
   async function handleLogout() {
@@ -22,6 +30,7 @@ export default function Header() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setUser(null);
+    setIsAdmin(false);
     router.push('/');
     router.refresh();
   }
@@ -30,6 +39,7 @@ export default function Header() {
     { href: '/', label: '首页' },
     { href: '/plan', label: '开始规划' },
     { href: '/history', label: '历史行程' },
+    ...(isAdmin ? [{ href: '/admin', label: '管理后台' }] : []),
   ];
 
   const isActive = (href: string) => pathname === href;
@@ -59,7 +69,14 @@ export default function Header() {
         </nav>
 
         <div className="hidden md:flex items-center gap-3">
-          {user ? (
+          {!supabaseConfigured ? (
+            <span className="text-xs text-gray-500 max-w-[200px] leading-snug text-right">
+              访客模式 ·{' '}
+              <Link href="/login" className="text-orange-600 hover:text-orange-700 underline-offset-2 hover:underline">
+                登录
+              </Link>
+            </span>
+          ) : user ? (
             <>
               <span className="text-sm text-gray-500 truncate max-w-[160px]">{user.email}</span>
               <button
@@ -113,7 +130,11 @@ export default function Header() {
             </Link>
           ))}
           <div className="border-t border-gray-100 pt-3 mt-2">
-            {user ? (
+            {!supabaseConfigured ? (
+              <Link href="/login" onClick={() => setMenuOpen(false)} className="text-sm text-orange-600 font-medium">
+                登录
+              </Link>
+            ) : user ? (
               <button onClick={handleLogout} className="text-sm text-gray-600">登出</button>
             ) : (
               <div className="flex gap-3">

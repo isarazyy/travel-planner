@@ -13,7 +13,7 @@ async function tavilySearch(query: string, maxResults: number): Promise<TavilyRe
   if (!apiKey) return [];
 
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 12_000);
+  const t = setTimeout(() => controller.abort(), 8_000);
   try {
     const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
@@ -68,6 +68,11 @@ export async function buildHotelWebContextForPrompt(data: TripFormData): Promise
   if (!process.env.TAVILY_API_KEY?.trim()) {
     return { contextText: '', used: false };
   }
+  /** 设为 1/true 时跳过联网住宿检索，省几秒～十几秒前置等待 */
+  const skip = process.env.TRAVEL_SKIP_HOTEL_WEB?.trim();
+  if (skip === '1' || skip?.toLowerCase() === 'true') {
+    return { contextText: '', used: false };
+  }
 
   try {
   const isFast = data.generationMode === 'fast';
@@ -106,14 +111,14 @@ export async function buildHotelWebContextForPrompt(data: TripFormData): Promise
   }
 
   const batch = await Promise.all(
-    queries.map((q) => tavilySearch(`${q} ${dateHint}`, isFast ? 5 : 6))
+    queries.map((q) => tavilySearch(`${q} ${dateHint}`, isFast ? 4 : 5))
   );
   const merged = dedupeByUrl(batch.flat());
   if (merged.length === 0) {
     return { contextText: '', used: false };
   }
 
-  const maxChars = isFast ? 3600 : 6500;
+  const maxChars = isFast ? 3200 : 5200;
   let out = '';
   let i = 0;
   for (const r of merged) {

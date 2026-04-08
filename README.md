@@ -5,7 +5,7 @@ AI 驱动的个性化旅行规划 Web 应用。
 ## 功能
 
 - 9步深度定制问卷（同行人、节奏、兴趣、住宿、餐饮、预算、交通等）
-- AI 智能生成（通义千问大模型）
+- AI 智能生成（通义千问大模型）；**未登录也可生成与对话改方案**；已登录且已配置 Supabase 时，生成成功后会**自动保存**到「历史行程」
 - 4种出行方式对比（穷游/自驾/高铁/飞机）
 - 每日时间线 + 费用拆解
 - 账号系统 + 历史行程管理
@@ -45,8 +45,9 @@ TAVILY_API_KEY=tvly-你的密钥
 ### 1. 创建 Supabase 项目
 
 1. 访问 https://supabase.com 注册并创建项目
-2. 进入 SQL Editor，粘贴 `supabase/schema.sql` 的内容执行
-3. 在 Settings > API 页面获取 Project URL 和 anon key
+2. 进入 SQL Editor，粘贴 `supabase/schema.sql` 的内容执行（新建项目用这一份即可）
+3. 若项目是很早以前按旧版 `schema.sql` 建的，请再执行 `supabase/migrations/002_publish_trips_extend.sql`，为 `trips` 增加 `destinations`、`date_mode`，并去掉 `trip_plans.mode` 的枚举限制（否则新保存可能失败）
+4. 在 Settings > API 页面获取 Project URL 和 anon key
 
 ### 2. 获取千问 API Key
 
@@ -62,6 +63,12 @@ NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJxxx...
 DASHSCOPE_API_KEY=sk-xxx...
 ```
+
+**生成速度（可选）**
+
+- 应用默认「极速」单方案，且标准/对话默认使用 `qwen-turbo`（比 `qwen-plus` 快很多）。若要更强模型、接受更慢等待，可设置：`QWEN_MODEL_STANDARD=qwen-plus`（或 DashScope 文档中的其他模型名）。
+- `QWEN_MODEL_FAST`、`QWEN_MODEL_CHAT` 可分别覆盖极速生成与对话改方案的模型。
+- 已配置 `TAVILY_API_KEY` 时，住宿联网检索会占几秒～十几秒前置时间；可设 `TRAVEL_SKIP_HOTEL_WEB=1` 跳过以加快首字节前的等待。
 
 ### 4. 部署到 Vercel
 

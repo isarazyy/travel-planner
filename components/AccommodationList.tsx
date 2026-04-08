@@ -14,11 +14,11 @@ export default function AccommodationList({
       <h3 className="font-semibold text-gray-900 mb-2">🏨 住宿推荐</h3>
       {webSearchUsed ? (
         <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 mb-4 leading-relaxed">
-          以下为<strong>联网检索</strong>公开网页后，由 AI 对多条摘要做的归纳（优势 / 劣势）。不跳转外链；具体房价、房态与最新评价仍可能变化，预订前建议你在常用 App 里再搜店名核对。
+          以下为 AI 综合推荐，房价仅供参考，预订前请在携程/美团等平台核实。
         </p>
       ) : (
-        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-4 leading-relaxed">
-          当前<strong>未开启联网检索</strong>（在服务端配置 <code className="bg-amber-100 px-1 rounded">TAVILY_API_KEY</code> 后，会自动搜索网页摘要再汇总成优劣势）。下面是模型根据常识整理的参考，可信度低于联网汇总。
+        <p className="text-xs text-gray-500 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 mb-4 leading-relaxed">
+          以下为 AI 根据常识整理的参考，仅供参考。
         </p>
       )}
       <div className="space-y-5">

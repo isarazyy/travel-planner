@@ -4,6 +4,7 @@ export interface TripPreferences {
   pace: string;
   interests: string[];
   accommodation: string;
+  accommodationStyles?: string[];
   foodPrefs: string[];
   dietaryNotes?: string;
   budgetLevel: string;
@@ -12,6 +13,10 @@ export interface TripPreferences {
   motoBikeType?: string;
   motoDailyKm?: number;
   motoAllowNightRide?: 'yes' | 'no';
+  /** 摩托车骑行类型：touring=摩旅（多日长途）, mountain_run=跑山 */
+  motoRideType?: 'touring' | 'mountain_run';
+  /** 跑山车辆类型 */
+  mountainRunVehicle?: 'motorcycle' | 'car' | 'bicycle';
   wakeUpTime: string;
   mustVisit?: string;
   mustAvoid?: string;
@@ -27,11 +32,14 @@ export interface TripFormData {
   destinations: string[];
   destinationMode: DestinationMode;
   destinationThemes: string[];
+  /** 仅在 destinationMode === 'open' 时使用的二级偏好标签，可多选 */
+  openModeDetails?: string[];
   destinationHint: string;
   dateMode: DateMode;
   generationMode: GenerationMode;
   startDate: string;
   endDate: string;
+  dateHint?: string;
   peopleCount: number;
   preferences: TripPreferences;
 }
@@ -43,6 +51,28 @@ export interface DayActivity {
   duration: string;
   cost: number;
   notes?: string;
+  /** 可选：跨城交通细节 */
+  transportInfo?: {
+    fromStation?: string;
+    toStation?: string;
+    trainNo?: string;
+    departTime?: string;
+    arriveTime?: string;
+    duration?: string;
+    priceNote?: string;
+  };
+  /** 可选：住宿细节（每晚） */
+  stayInfo?: {
+    hotelName?: string;
+    pricePerNight?: number;
+  };
+  /** 可选：餐饮推荐细节 */
+  foodRecommendation?: {
+    shopName?: string;
+    rating?: number;
+    specialty?: string;
+    reason?: string;
+  };
 }
 
 export interface DayPlan {
@@ -114,6 +144,8 @@ export interface Trip {
   id: string;
   user_id: string;
   departure: string;
+  /** 数据库单列 summary，与 destinations 数组可能并存 */
+  destination?: string;
   destinations: string[];
   date_mode: DateMode;
   start_date: string;
@@ -183,6 +215,17 @@ export const ACCOM_OPTIONS = [
   { value: 'mixed', label: '混搭都行', desc: '看情况安排' },
 ];
 
+export const ACCOM_STYLE_OPTIONS = [
+  { value: 'designer', label: '设计感', desc: '装修有格调、拍照好看', icon: '🎨' },
+  { value: 'boutique_bnb', label: '高端民宿', desc: '精品独栋、管家服务', icon: '🏡' },
+  { value: 'scenic_view', label: '景观房', desc: '山景/湖景/海景/江景', icon: '🏔️' },
+  { value: 'cultural', label: '文化主题', desc: '古宅改造、茶室禅意', icon: '🏯' },
+  { value: 'resort', label: '度假村/温泉', desc: '泡池、花园、放松为主', icon: '♨️' },
+  { value: 'treehouse_cave', label: '特色体验', desc: '树屋、洞穴、帐篷、星空房', icon: '⛺' },
+  { value: 'pet_friendly', label: '可带宠物', desc: '允许携带毛孩子', icon: '🐾' },
+  { value: 'no_preference', label: '不挑风格', desc: '干净方便就行', icon: '✅' },
+];
+
 export const FOOD_PREF_OPTIONS = [
   { value: 'local_must', label: '本地特色必吃' },
   { value: 'street', label: '街边小吃为主' },
@@ -232,6 +275,17 @@ export const MODE_ICONS: Record<string, string> = {
   flight: '✈️',
   motorcycle: '🏍️',
 };
+
+export function modeDisplayLabel(mode: string): string {
+  if (MODE_LABELS[mode]) return MODE_LABELS[mode];
+  const m = /^plan_(\d+)$/.exec(mode);
+  if (m) return `方案 ${Number(m[1]) + 1}`;
+  return mode;
+}
+
+export function modeIcon(mode: string): string {
+  return MODE_ICONS[mode] || '📋';
+}
 
 export const DESTINATION_MODE_OPTIONS = [
   { value: 'specific' as DestinationMode, label: '我有目的地', desc: '列出想去哪，AI 排最优先后顺序与走法', icon: '📍' },

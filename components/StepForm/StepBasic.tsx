@@ -9,6 +9,7 @@ import {
   type DateMode,
   type DestinationMode,
 } from '@/lib/types';
+import { compareIso } from '@/lib/date-utils';
 
 export default function StepBasic({
   data,
@@ -22,6 +23,7 @@ export default function StepBasic({
 
   const destinations = Array.isArray(d.destinations) ? d.destinations : [];
   const destinationThemes = Array.isArray(d.destinationThemes) ? d.destinationThemes : [];
+  const openModeDetails = Array.isArray(d.openModeDetails) ? d.openModeDetails : [];
   const destinationMode: DestinationMode = d.destinationMode || 'specific';
   const dateMode: DateMode = d.dateMode || 'fixed';
 
@@ -50,6 +52,12 @@ export default function StepBasic({
     update({ destinationThemes: next });
   }
 
+  function toggleOpenDetail(value: string) {
+    const list = Array.isArray(d.openModeDetails) ? d.openModeDetails : [];
+    const next = list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+    update({ openModeDetails: next });
+  }
+
   const clampPeople = (n: number) => Math.min(20, Math.max(1, n));
 
   const inputClass =
@@ -65,6 +73,7 @@ export default function StepBasic({
           value={d.departure ?? ''}
           onChange={(e) => update({ departure: e.target.value })}
           placeholder="你从哪里出发？如：北京"
+          maxLength={50}
           className={`${inputClass} w-full`}
         />
       </div>
@@ -79,7 +88,15 @@ export default function StepBasic({
             <button
               key={opt.value}
               type="button"
-              onClick={() => update({ destinationMode: opt.value, destinations: [], destinationThemes: [], destinationHint: '' })}
+              onClick={() =>
+                update({
+                  destinationMode: opt.value,
+                  destinations: [],
+                  destinationThemes: [],
+                  openModeDetails: [],
+                  destinationHint: '',
+                })
+              }
               className={`text-left rounded-xl border p-4 transition-all duration-200 ${
                 destinationMode === opt.value
                   ? 'border-orange-500 bg-orange-50 ring-1 ring-orange-500/20'
@@ -166,22 +183,54 @@ export default function StepBasic({
               value={d.destinationHint ?? ''}
               onChange={(e) => update({ destinationHint: e.target.value })}
               placeholder="补充你的想法，如：3天短途、不要太贵、周末出发"
+              maxLength={200}
               className={`${inputClass} w-full`}
             />
           </div>
         )}
 
         {destinationMode === 'open' && (
-          <div className="text-sm text-gray-500 bg-gray-50 rounded-lg p-4">
-            你可以什么都不填，AI 会根据出发地推荐最近热门去处并生成规划。<br />
-            如果有要求可写在下面：
-            <input
-              type="text"
-              value={d.destinationHint ?? ''}
-              onChange={(e) => update({ destinationHint: e.target.value })}
-              placeholder="例如：想轻松一点、预算不要太高、优先自然风景"
-              className={`${inputClass} w-full mt-2`}
-            />
+          <div className="text-sm bg-gray-50 rounded-lg p-4 space-y-3">
+            <p className="text-gray-600">
+              你可以什么都不填，AI 会根据出发地推荐近期热门去处并生成规划。
+              也可以勾选下面的偏好，让推荐更贴近你的想法（可多选）：
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: 'nearby', label: '就近周边转转' },
+                { value: 'fly_short', label: '飞一趟 3–5 天' },
+                { value: 'long_route', label: '跨省长线玩透一点' },
+                { value: 'nature_first', label: '自然风景为主' },
+                { value: 'city_first', label: '城市体验为主' },
+              ].map((opt) => {
+                const on = openModeDetails.includes(opt.value);
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => toggleOpenDetail(opt.value)}
+                    className={`px-3 py-1.5 rounded-full border text-xs sm:text-sm transition ${
+                      on
+                        ? 'border-orange-500 bg-orange-50 text-orange-700'
+                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-1">还有其他想法也可以补充：</p>
+              <input
+                type="text"
+                value={d.destinationHint ?? ''}
+                onChange={(e) => update({ destinationHint: e.target.value })}
+                placeholder="例如：想轻松一点、预算不要太高、最好周末出发"
+                maxLength={200}
+                className={`${inputClass} w-full`}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -217,7 +266,15 @@ export default function StepBasic({
               <input
                 type="date"
                 value={d.startDate ?? ''}
-                onChange={(e) => update({ startDate: e.target.value })}
+                max={d.endDate || undefined}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  let end = d.endDate ?? '';
+                  if (next && end && compareIso(end, next) < 0) {
+                    end = next;
+                  }
+                  update({ startDate: next, endDate: end });
+                }}
                 className={inputClass}
               />
             </label>
@@ -226,17 +283,21 @@ export default function StepBasic({
               <input
                 type="date"
                 value={d.endDate ?? ''}
-                onChange={(e) => update({ endDate: e.target.value })}
+                min={d.startDate || undefined}
+                onChange={(e) => {
+                  let next = e.target.value;
+                  const start = d.startDate ?? '';
+                  if (start && next && compareIso(next, start) < 0) {
+                    next = start;
+                  }
+                  update({ endDate: next });
+                }}
                 className={inputClass}
               />
             </label>
           </div>
         )}
-        {dateMode === 'fixed' && (
-          <p className="text-xs text-gray-500 mt-3">
-            AI 按你选的出发、返程日安排全程，不会建议改到别的月份；并会在方案里补充<strong className="text-gray-700">顺路/半日周边</strong>可玩点。
-          </p>
-        )}
+        {dateMode === 'fixed' && null}
 
         {dateMode === 'flexible_end' && (
           <label className="flex flex-col gap-1.5 max-w-xs">
@@ -252,8 +313,16 @@ export default function StepBasic({
         )}
 
         {dateMode === 'flexible_all' && (
-          <div className="text-sm text-gray-400 bg-gray-50 rounded-lg p-4">
-            AI 将根据你的目的地和偏好，推荐最佳出行季节和天数
+          <div className="mt-1">
+            <p className="text-sm text-gray-500 mb-2">有什么时间偏好？没有可以留空</p>
+            <input
+              type="text"
+              placeholder="例如：想夏天去、避开国庆、周末出发…"
+              maxLength={200}
+              value={d.dateHint ?? ''}
+              onChange={(e) => update({ dateHint: e.target.value })}
+              className={`${inputClass} w-full`}
+            />
           </div>
         )}
       </div>

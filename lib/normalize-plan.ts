@@ -14,9 +14,17 @@ function activityCost(v: unknown): number {
   return Number.isFinite(n) ? Math.max(0, n) : 0;
 }
 
+function safeText(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const s = v.trim();
+  if (!s || s === 'undefined' || s === 'null') return undefined;
+  return s;
+}
+
 const DEFAULT_TIPS = [
   '出发前核对证件、车票与主要景点/博物馆的预约与开闭馆时间。',
   '跨省、跨市交通以12306、客运站或航空公司官方信息为准，勿轻信不符合地图距离的「超短车程」表述。',
+  '本方案中的车次号、发到时刻与铁路票价仅为规划示意时可能不完整；购票前务必在12306官网或官方App按出行日期重新查询。',
 ];
 
 export function normalizeTips(tips: unknown): string[] {
@@ -49,6 +57,36 @@ export function normalizeItinerary(itinerary: unknown): DayPlan[] {
         duration: sanitizePlanString(a?.duration, '时长待定'),
         cost: activityCost(a?.cost),
       };
+      const t = (a?.transportInfo || {}) as Record<string, unknown>;
+      const transportInfo = {
+        fromStation: safeText(t.fromStation),
+        toStation: safeText(t.toStation),
+        trainNo: safeText(t.trainNo),
+        departTime: safeText(t.departTime),
+        arriveTime: safeText(t.arriveTime),
+        duration: safeText(t.duration),
+        priceNote: safeText(t.priceNote),
+      };
+      if (Object.values(transportInfo).some(Boolean)) row.transportInfo = transportInfo;
+
+      const st = (a?.stayInfo || {}) as Record<string, unknown>;
+      const stayInfo = {
+        hotelName: safeText(st.hotelName),
+        pricePerNight: activityCost(st.pricePerNight),
+      };
+      if (stayInfo.hotelName || stayInfo.pricePerNight > 0) row.stayInfo = stayInfo;
+
+      const fd = (a?.foodRecommendation || {}) as Record<string, unknown>;
+      const ratingNum = Number(fd.rating);
+      const foodRecommendation = {
+        shopName: safeText(fd.shopName),
+        rating: Number.isFinite(ratingNum) ? Math.max(0, Math.min(5, ratingNum)) : undefined,
+        specialty: safeText(fd.specialty),
+        reason: safeText(fd.reason),
+      };
+      if (Object.values(foodRecommendation).some((x) => x !== undefined && x !== '')) {
+        row.foodRecommendation = foodRecommendation;
+      }
       if (notes) row.notes = notes;
       return row;
     });
@@ -100,16 +138,15 @@ export function ensureItineraryMatchesDates(
       day: i + 1,
       date: formatCnDateWithWeekday(iso),
       dateIso: iso,
-      theme: '本日行程可按节奏微调',
+      theme: '自由活动日',
       activities: [
         {
           time: '全天',
-          activity:
-            '上一版未展开：可安排休整、城市漫步、转场或周边小景点（也可用右侧对话让 AI 细化）',
-          location: '当日主要停留城市/区域',
+          activity: '自由活动，可在当地随意探索',
+          location: '当日停留区域',
           duration: '自由安排',
           cost: 0,
-          notes: '系统已按你的出发～返回日期补齐本日，避免漏天。',
+          notes: '可在下方对话框让 AI 帮你补充具体安排',
         },
       ],
     });

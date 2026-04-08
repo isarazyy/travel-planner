@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Trip, MODE_LABELS, MODE_ICONS } from '@/lib/types';
+import { Trip, modeDisplayLabel, modeIcon } from '@/lib/types';
 import DayTimeline from './DayTimeline';
 import CostBreakdown from './CostBreakdown';
 import AccommodationList from './AccommodationList';
@@ -48,8 +48,8 @@ export default function PlanResult({ trip }: { trip: Trip }) {
                 : 'bg-white text-gray-600 border border-gray-100 hover:border-orange-200'
             }`}
           >
-            <span>{MODE_ICONS[plan.mode] || '🚀'}</span>
-            <span>{MODE_LABELS[plan.mode] || plan.mode}</span>
+            <span>{modeIcon(plan.mode)}</span>
+            <span>{modeDisplayLabel(plan.mode)}</span>
             <span className={`text-xs ${activeMode === plan.mode ? 'text-orange-100' : 'text-gray-400'}`}>
               ¥{(plan.estimated_total || 0).toLocaleString()}
             </span>

@@ -7,6 +7,8 @@ create table if not exists public.trips (
   user_id uuid references auth.users(id) on delete cascade not null,
   departure text not null,
   destination text not null,
+  destinations text[] default array[]::text[],
+  date_mode text default 'fixed',
   start_date date not null,
   end_date date not null,
   people_count int not null default 1,
@@ -18,7 +20,7 @@ create table if not exists public.trips (
 create table if not exists public.trip_plans (
   id uuid default gen_random_uuid() primary key,
   trip_id uuid references public.trips(id) on delete cascade not null,
-  mode text not null check (mode in ('budget', 'self_drive', 'train', 'flight')),
+  mode text not null,
   transport_detail text default '',
   itinerary jsonb not null default '[]',
   attractions jsonb not null default '[]',
@@ -39,7 +41,14 @@ create index if not exists idx_trip_plans_trip_id on public.trip_plans(trip_id);
 alter table public.trips enable row level security;
 alter table public.trip_plans enable row level security;
 
--- Trips policies: users can only access their own trips
+-- Trips policies: users can only access their own trips（可重复执行）
+drop policy if exists "Users can view own trips" on public.trips;
+drop policy if exists "Users can create own trips" on public.trips;
+drop policy if exists "Users can delete own trips" on public.trips;
+drop policy if exists "Users can view own trip plans" on public.trip_plans;
+drop policy if exists "Users can create own trip plans" on public.trip_plans;
+drop policy if exists "Users can delete own trip plans" on public.trip_plans;
+
 create policy "Users can view own trips"
   on public.trips for select
   using (auth.uid() = user_id);

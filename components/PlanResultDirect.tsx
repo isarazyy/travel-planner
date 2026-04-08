@@ -1,14 +1,27 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { useEffect, useRef, useState } from 'react';
 import { toPng } from 'html-to-image';
 import DayTimeline from './DayTimeline';
 import CostBreakdown from './CostBreakdown';
 import AccommodationList from './AccommodationList';
 import type { TripWeatherPayload } from '@/lib/weather';
+import type { TripPreferences } from '@/lib/types';
 import { normalizeTips, sanitizePlanString } from '@/lib/normalize-plan';
 import { getDressAndUmbrellaAdvice } from '@/lib/weather-advice';
 import { parseSSEResponse } from '@/lib/parse-sse';
+import { createClient as createSupabaseClient } from '@/lib/supabase-browser';
+import RegisterPrompt from './RegisterPrompt';
+
+const TripRouteMap = dynamic(() => import('./TripRouteMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="mb-6 rounded-xl border border-gray-100 bg-gray-50 h-48 flex items-center justify-center text-sm text-gray-500">
+      地图加载中…
+    </div>
+  ),
+});
 
 /** Tailwind v4 使用 oklch 等颜色，html2canvas 易得到空白图；html-to-image 兼容性更好。 */
 function safeFilename(name: string, ext: string) {
@@ -54,10 +67,14 @@ interface PlanData {
 interface TripData {
   departure: string;
   destinations: string[];
+  /** 云端 trips.destination 或旧数据摘要 */
+  destination?: string | null;
   date_mode: string;
   start_date: string;
   end_date: string;
   people_count: number;
+  /** 生成结果里会带上，供对话改方案时继续遵守 mustAvoid 等 */
+  preferences?: TripPreferences;
 }
 
 interface Recommendations {
@@ -70,6 +87,21 @@ interface Recommendations {
 
 function isTimeoutLike(msg: string): boolean {
   return /(超时|timeout|Abort|ETIMEDOUT|aborted)/i.test(msg);
+}
+
+/** 是否需要展示「未接12306」说明（含历史方案里可能已编造车次） */
+function planMentionsRail(plan: { transport_detail?: string; itinerary?: unknown[] }): boolean {
+  const td = plan.transport_detail;
+  if (typeof td === 'string' && /(高铁|动车|火车|铁路|城际|12306|车次)/.test(td)) return true;
+  for (const d of plan.itinerary || []) {
+    const acts = (d as { activities?: unknown[] })?.activities;
+    if (!Array.isArray(acts)) continue;
+    for (const a of acts) {
+      const ti = (a as { transportInfo?: Record<string, unknown> })?.transportInfo;
+      if (ti && typeof ti === 'object' && Object.keys(ti).length > 0) return true;
+    }
+  }
+  return false;
 }
 
 export default function PlanResultDirect({
@@ -89,18 +121,37 @@ export default function PlanResultDirect({
   const [versionCounts, setVersionCounts] = useState<number[]>(plans.map(() => 1));
   const [lastChangeSummary, setLastChangeSummary] = useState('');
   const [messages, setMessages] = useState<Array<{ role: 'user' | 'assistant'; content: string }>>([
-    { role: 'assistant', content: '你可以继续告诉我想怎么改，比如“第2天轻松一点”“预算降到5000以内”“把博物馆换成夜景”。' },
+    { role: 'assistant', content: '想改方案直接说就行，比如“换个酒店”“去掉第3天”～不确定的也可以先聊聊。' },
   ]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
   const [chatError, setChatError] = useState('');
   const [chatNotice, setChatNotice] = useState('');
+  const [chatExpanded, setChatExpanded] = useState(true);
+  const chatScrollRef = useRef<HTMLDivElement>(null);
   const [exportingImage, setExportingImage] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
+  const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
+
+  useEffect(() => {
+    const sb = createSupabaseClient();
+    if (!sb) { setIsLoggedIn(false); return; }
+    sb.auth.getUser().then(({ data }) => setIsLoggedIn(!!data.user));
+  }, []);
   const activePlan = localPlans[activeIdx];
+  const activePlanRef = useRef(activePlan);
+  activePlanRef.current = activePlan;
   const displayTips = activePlan ? normalizeTips(activePlan.tips) : [];
   const isFixedDates = trip.date_mode === 'fixed' && !!(trip.start_date && trip.end_date);
+
+  useEffect(() => {
+    if (!chatExpanded) return;
+    const el = chatScrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [messages, chatLoading, chatExpanded]);
 
   async function requestPlanChat(payload: Record<string, unknown>, timeoutMs = 300000) {
     const controller = new AbortController();
@@ -304,7 +355,7 @@ export default function PlanResultDirect({
 
   async function handleChatSubmit() {
     const message = chatInput.trim();
-    if (!message || !activePlan) return;
+    if (!message || !activePlanRef.current) return;
     setChatError('');
     setChatNotice('');
     setChatLoading(true);
@@ -312,12 +363,13 @@ export default function PlanResultDirect({
     setChatInput('');
 
     try {
+      const currentPlan = activePlanRef.current;
       const payload = {
         trip,
         recommendations,
-        activePlan,
+        activePlan: currentPlan,
         message,
-        history: messages,
+        history: messages.slice(-16),
       };
       let json: any;
       try {
@@ -331,10 +383,14 @@ export default function PlanResultDirect({
       if (json?.fallbackUsed) {
         setChatNotice('本次修改请求较慢，系统已自动重试并成功完成。');
       }
-      setMessages((prev) => [...prev, { role: 'assistant', content: json.assistantMessage || '已完成调整。' }]);
-      setLastChangeSummary(json.changeSummary || '已更新当前方案');
-      setLocalPlans((prev) => prev.map((p, i) => (i === activeIdx ? json.updatedPlan : p)));
-      setVersionCounts((prev) => prev.map((v, i) => (i === activeIdx ? v + 1 : v)));
+      const modified = !!(json.planModified && json.updatedPlan);
+      setMessages((prev) => [...prev, { role: 'assistant', content: json.assistantMessage || '好的～' }]);
+      if (modified) {
+        const up = json.updatedPlan;
+        setLastChangeSummary(json.changeSummary || '已更新当前方案');
+        setLocalPlans((prev) => prev.map((p, i) => (i === activeIdx ? up : p)));
+        setVersionCounts((prev) => prev.map((v, i) => (i === activeIdx ? v + 1 : v)));
+      }
     } catch (err: any) {
       setChatError(err.message || '修改失败，请重试');
       setMessages((prev) => [...prev, { role: 'assistant', content: '这次修改失败了，你可以重试一次。' }]);
@@ -353,7 +409,7 @@ export default function PlanResultDirect({
   }
 
   return (
-    <div>
+    <div className={activePlan ? (chatExpanded ? 'pb-[min(42vh,22rem)] sm:pb-96' : 'pb-28') : undefined}>
       <div className="flex flex-col items-end gap-2 mb-4">
         {exportError && (
           <div className="w-full max-w-xl text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
@@ -362,20 +418,20 @@ export default function PlanResultDirect({
         )}
         <div className="flex flex-wrap items-center justify-end gap-2">
         <button
-          onClick={handleExportDoc}
+          onClick={() => { if (isLoggedIn === false) { setShowRegisterPrompt(true); return; } handleExportDoc(); }}
           className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50"
         >
           导出文档
         </button>
         <button
-          onClick={handleExportPdf}
+          onClick={() => { if (isLoggedIn === false) { setShowRegisterPrompt(true); return; } handleExportPdf(); }}
           disabled={exportingPdf}
           className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-50"
         >
           {exportingPdf ? '准备PDF...' : '导出PDF'}
         </button>
         <button
-          onClick={handleExportImage}
+          onClick={() => { if (isLoggedIn === false) { setShowRegisterPrompt(true); return; } handleExportImage(); }}
           disabled={exportingImage}
           className="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm hover:bg-black disabled:opacity-50"
         >
@@ -383,6 +439,21 @@ export default function PlanResultDirect({
         </button>
         </div>
       </div>
+
+      {activePlan && (
+        <TripRouteMap
+          trip={{
+            departure: trip.departure,
+            destinations: trip.destinations || [],
+            destination: trip.destination,
+          }}
+          recommendedRoute={recommendations?.route}
+          itinerary={activePlan.itinerary || []}
+          transportModes={trip.preferences?.transportModes}
+          isMountainRun={trip.preferences?.motoRideType === 'mountain_run'}
+        />
+      )}
+
       <div ref={exportRef} className="export-capture-root">
       {/* Trip header */}
       <div className="bg-white rounded-xl border border-gray-100 p-6 mb-6">
@@ -519,13 +590,26 @@ export default function PlanResultDirect({
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Left: Itinerary */}
           <div className="lg:col-span-2 space-y-4">
-            {activePlan.transport_detail && (
-              <div className="bg-blue-50 rounded-xl p-4 text-sm text-blue-800">
-                🚀 <strong>交通方案：</strong>{activePlan.transport_detail}
-              </div>
-            )}
+            {activePlan.transport_detail && (() => {
+              const modes = trip.preferences?.transportModes || [];
+              const isMoto = modes.includes('motorcycle');
+              const isDrive = modes.includes('self_drive');
+              const icon = isMoto ? '🏍️' : isDrive ? '🚗' : '🚀';
+              const label = isMoto ? '骑行路线：' : isDrive ? '自驾路线：' : '交通方案：';
+              const colors = isMoto
+                ? 'bg-amber-50 text-amber-800 border border-amber-100'
+                : isDrive
+                  ? 'bg-orange-50 text-orange-800 border border-orange-100'
+                  : 'bg-blue-50 text-blue-800';
+              return (
+                <div className={`rounded-xl p-4 text-sm ${colors}`}>
+                  {icon}{' '}<strong>{label}</strong>{activePlan.transport_detail}
+                </div>
+              );
+            })()}
 
-            {activePlan.itinerary.map((day: any, i: number) => (
+
+            {(activePlan.itinerary || []).map((day: any, i: number) => (
               <DayTimeline key={i} day={day} tripWeather={recommendations?.weather ?? null} />
             ))}
 
@@ -546,55 +630,13 @@ export default function PlanResultDirect({
 
           {/* Right sidebar */}
           <div className="space-y-6">
-            <div className="bg-white rounded-xl border border-gray-100 p-4">
-              <h3 className="font-semibold text-gray-900 mb-3">继续和 AI 调整方案</h3>
-              <div className="space-y-2 max-h-52 overflow-y-auto mb-3 pr-1">
-                {messages.map((m, i) => (
-                  <div
-                    key={i}
-                    className={`text-sm rounded-lg px-3 py-2 ${
-                      m.role === 'user'
-                        ? 'bg-orange-50 text-orange-800'
-                        : 'bg-gray-50 text-gray-700'
-                    }`}
-                  >
-                    {m.content}
-                  </div>
-                ))}
-              </div>
-              {chatError && <p className="text-xs text-red-600 mb-2">{chatError}</p>}
-              {chatNotice && <p className="text-xs text-emerald-700 mb-2">{chatNotice}</p>}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleChatSubmit();
-                    }
-                  }}
-                  placeholder="例如：第2天太赶了，改成慢一点"
-                  className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20"
-                />
-                <button
-                  onClick={handleChatSubmit}
-                  disabled={chatLoading || !chatInput.trim()}
-                  className="px-3 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {chatLoading ? '修改中' : '发送'}
-                </button>
-              </div>
-            </div>
-
             <CostBreakdown cost={activePlan.cost_breakdown} peopleCount={trip.people_count} />
 
-            {activePlan.attractions.length > 0 && (
+            {(activePlan.attractions?.length ?? 0) > 0 && (
               <div className="bg-white rounded-xl border border-gray-100 p-5">
                 <h3 className="font-semibold text-gray-900 mb-3">🏷️ 推荐景点</h3>
                 <div className="space-y-3">
-                  {activePlan.attractions.map((a: any, i: number) => (
+                  {(activePlan.attractions || []).map((a: any, i: number) => (
                     <div key={i} className="border-b border-gray-50 pb-3 last:border-0 last:pb-0">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-900">{a.name}</span>
@@ -611,15 +653,15 @@ export default function PlanResultDirect({
               </div>
             )}
 
-            {activePlan.accommodations.length > 0 && (
+            {(activePlan.accommodations?.length ?? 0) > 0 && (
               <AccommodationList items={activePlan.accommodations} webSearchUsed={hotelWebSearchUsed} />
             )}
 
-            {activePlan.food_spots.length > 0 && (
+            {(activePlan.food_spots?.length ?? 0) > 0 && (
               <div className="bg-white rounded-xl border border-gray-100 p-5">
                 <h3 className="font-semibold text-gray-900 mb-3">🍽️ 美食推荐</h3>
                 <div className="space-y-3">
-                  {activePlan.food_spots.map((f: any, i: number) => (
+                  {(activePlan.food_spots || []).map((f: any, i: number) => (
                     <div key={i} className="border-b border-gray-50 pb-3 last:border-0 last:pb-0">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-900">{f.name}</span>
@@ -636,6 +678,118 @@ export default function PlanResultDirect({
         </div>
       )}
       </div>
+
+      {activePlan && (
+        <div
+          className="fixed bottom-0 left-0 right-0 z-[100] pointer-events-none"
+          aria-label="与 AI 调整方案"
+        >
+          <div className="pointer-events-auto max-w-5xl mx-auto px-3 sm:px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            <div className="rounded-t-2xl border border-gray-200/90 border-b-0 bg-white/95 backdrop-blur-md shadow-[0_-8px_32px_rgba(0,0,0,0.08)] overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setChatExpanded((v) => !v)}
+                className="w-full flex items-center justify-between gap-3 px-4 py-2.5 border-b border-gray-100 bg-gradient-to-r from-orange-50/80 to-white text-left hover:bg-orange-50/50 transition"
+              >
+                <span className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                  <span className="text-base" aria-hidden>
+                    💬
+                  </span>
+                  与 AI 调整方案
+                </span>
+                <span className="text-xs text-gray-500 shrink-0 tabular-nums">
+                  {chatExpanded ? '收起对话 ↑' : '展开对话 ↓'}
+                </span>
+              </button>
+
+              {chatExpanded && (
+                <div
+                  ref={chatScrollRef}
+                  className="max-h-[min(36vh,280px)] overflow-y-auto px-3 py-3 space-y-2.5 bg-[#f5f5f7]"
+                >
+                  {messages.map((m, i) => (
+                    <div
+                      key={i}
+                      className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[min(88%,28rem)] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                          m.role === 'user'
+                            ? 'bg-orange-500 text-white rounded-br-md shadow-sm'
+                            : 'bg-white text-gray-800 border border-gray-200/90 rounded-bl-md shadow-sm'
+                        }`}
+                      >
+                        {m.content}
+                      </div>
+                    </div>
+                  ))}
+                  {chatLoading && (
+                    <div className="flex justify-start">
+                      <div className="rounded-2xl rounded-bl-md px-3.5 py-2.5 text-xs text-gray-500 bg-white border border-gray-200/90 shadow-sm">
+                        <span className="inline-flex items-center gap-1.5">
+                          <span className="inline-block size-1.5 rounded-full bg-orange-400 animate-pulse" />
+                          AI 正在思考…
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(chatError || chatNotice) && (
+                <div className="px-3 pt-2 space-y-1 bg-[#f5f5f7]">
+                  {chatError && (
+                    <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5">
+                      {chatError}
+                    </p>
+                  )}
+                  {chatNotice && (
+                    <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1.5">
+                      {chatNotice}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {isLoggedIn === false ? (
+                <div
+                  className="flex items-center justify-center gap-2 p-3 bg-white border-t border-gray-100 cursor-pointer hover:bg-orange-50/50 transition"
+                  onClick={() => setShowRegisterPrompt(true)}
+                >
+                  <span className="text-sm text-gray-400">注册登录后即可使用 AI 对话修改方案</span>
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-orange-500 text-white font-medium">去注册</span>
+                </div>
+              ) : (
+              <div className="flex items-end gap-2 p-3 bg-white border-t border-gray-100">
+                <input
+                  type="text"
+                  value={chatInput}
+                  maxLength={500}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      handleChatSubmit();
+                    }
+                  }}
+                  placeholder="说说想怎么改方案…"
+                  className="flex-1 min-h-[44px] rounded-2xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm outline-none focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-500/15"
+                />
+                <button
+                  type="button"
+                  onClick={handleChatSubmit}
+                  disabled={chatLoading || !chatInput.trim()}
+                  className="shrink-0 min-h-[44px] min-w-[4.5rem] px-4 rounded-2xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium disabled:opacity-45 disabled:cursor-not-allowed transition"
+                >
+                  {chatLoading ? '…' : '发送'}
+                </button>
+              </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <RegisterPrompt open={showRegisterPrompt} onClose={() => setShowRegisterPrompt(false)} />
     </div>
   );
 }

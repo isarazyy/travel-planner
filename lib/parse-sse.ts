@@ -43,11 +43,15 @@ export async function parseSSEResponse<T = any>(response: Response): Promise<T> 
         else if (line.startsWith('data: ')) data = line.slice(6);
       }
       if (event === 'ping') continue;
-      if (event === 'result') {
-        result = JSON.parse(data) as T;
-      } else if (event === 'error') {
-        const parsed = JSON.parse(data);
-        errorMsg = parsed.error || '生成失败';
+      try {
+        if (event === 'result') {
+          result = JSON.parse(data) as T;
+        } else if (event === 'error') {
+          const parsed = JSON.parse(data);
+          errorMsg = parsed.error || '生成失败';
+        }
+      } catch {
+        errorMsg = 'AI 返回的数据格式有误，请重试';
       }
     }
 

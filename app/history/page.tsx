@@ -4,23 +4,43 @@ import { useEffect, useState } from 'react';
 import { Trip } from '@/lib/types';
 import TripCard from '@/components/TripCard';
 import Link from 'next/link';
+import { getAllLocalTrips, deleteLocalTrip } from '@/lib/local-storage-trips';
 
 export default function HistoryPage() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isLocal, setIsLocal] = useState(false);
 
   useEffect(() => {
     fetch('/api/trips')
       .then(r => r.json())
       .then(data => {
-        if (Array.isArray(data)) setTrips(data);
+        if (data?.source === 'local') {
+          setIsLocal(true);
+          setTrips(getAllLocalTrips() as unknown as Trip[]);
+        } else if (data?.source === 'cloud' && Array.isArray(data.trips)) {
+          setTrips(data.trips);
+        } else if (Array.isArray(data)) {
+          setTrips(data);
+        } else {
+          setIsLocal(true);
+          setTrips(getAllLocalTrips() as unknown as Trip[]);
+        }
+      })
+      .catch(() => {
+        setIsLocal(true);
+        setTrips(getAllLocalTrips() as unknown as Trip[]);
       })
       .finally(() => setLoading(false));
   }, []);
 
   async function handleDelete(id: string) {
     if (!confirm('确定删除这个行程吗？')) return;
-    await fetch(`/api/trips/${id}`, { method: 'DELETE' });
+    if (isLocal || id.startsWith('local_')) {
+      deleteLocalTrip(id);
+    } else {
+      await fetch(`/api/trips/${id}`, { method: 'DELETE' });
+    }
     setTrips(trips.filter(t => t.id !== id));
   }
 
@@ -63,6 +83,12 @@ export default function HistoryPage() {
             <TripCard key={trip.id} trip={trip} onDelete={handleDelete} />
           ))}
         </div>
+      )}
+
+      {isLocal && trips.length > 0 && (
+        <p className="mt-6 text-center text-xs text-gray-400">
+          行程保存在本地浏览器中，清除浏览器数据后将丢失。
+        </p>
       )}
     </div>
   );

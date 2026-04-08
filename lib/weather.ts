@@ -57,6 +57,7 @@ type GeoCodingRecord = {
   country?: string;
   admin1?: string;
   country_code?: string;
+  population?: number;
 };
 
 /** 限制预报区间长度（Open-Meteo 日预报通常支持约 16 天） */
@@ -86,18 +87,61 @@ type GeoHit = {
   admin1?: string;
 };
 
+async function geocodeCityViaAmap(name: string): Promise<GeoHit | null> {
+  const key = process.env.AMAP_KEY || process.env.NEXT_PUBLIC_AMAP_KEY;
+  if (!key) return null;
+  try {
+    const url = `https://restapi.amap.com/v3/geocode/geo?key=${key}&address=${encodeURIComponent(name)}`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      status: string;
+      geocodes?: Array<{ location: string; formatted_address?: string; province?: string; city?: string }>;
+    };
+    if (data.status !== '1' || !data.geocodes?.length) return null;
+    const g = data.geocodes[0];
+    const [lngStr, latStr] = g.location.split(',');
+    const lng = parseFloat(lngStr);
+    const lat = parseFloat(latStr);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+    const province = (g.province || '').replace(/省|市$/, '');
+    const cityName = typeof g.city === 'string' ? g.city.replace(/市$/, '') : '';
+    const displayCity = cityName || g.formatted_address || name;
+    return {
+      name: displayCity,
+      latitude: lat,
+      longitude: lng,
+      country: 'China',
+      admin1: province || undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function geocodeCity(name: string): Promise<GeoHit | null> {
   const q = name.trim();
   if (!q) return null;
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=zh&format=json`;
+
+  // Try AMap first — much more accurate for Chinese city names
+  const amapHit = await geocodeCityViaAmap(q);
+  if (amapHit) return amapHit;
+
+  // Fallback: Open-Meteo geocoding, pick CN result with highest population
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=10&language=zh&format=json`;
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const data = (await res.json()) as { results?: GeoCodingRecord[] };
     const results = data.results || [];
     if (!results.length) return null;
-    const cn = results.find((r) => r.country_code === 'CN' || r.country === 'China');
-    const r = cn || results[0];
+    const cnResults = results.filter((r) => r.country_code === 'CN' || r.country === 'China');
+    let r: GeoCodingRecord;
+    if (cnResults.length > 1) {
+      r = cnResults.reduce((best, cur) => ((cur.population ?? 0) > (best.population ?? 0) ? cur : best));
+    } else {
+      r = cnResults[0] || results[0];
+    }
     return {
       name: r.name || q,
       latitude: r.latitude,
@@ -124,7 +168,7 @@ async function fetchDailyForecast(
   u.searchParams.set('start_date', startDate);
   u.searchParams.set('end_date', endDate);
   try {
-    const res = await fetch(u.toString(), { signal: AbortSignal.timeout(10000) });
+    const res = await fetch(u.toString(), { signal: AbortSignal.timeout(7000) });
     if (!res.ok) return [];
     const data = await res.json();
     const daily = data.daily;
@@ -173,9 +217,21 @@ function resolveDateRange(formData: TripFormData): { start: string; end: string 
 }
 
 function resolveWeatherQueries(formData: TripFormData): { names: string[]; note?: string } {
+  const isMountainRun = formData.preferences?.motoRideType === 'mountain_run';
+
+  // Mountain run: weather based on departure city (destinations are just direction hints)
+  if (isMountainRun) {
+    const dep = formData.departure?.trim();
+    if (!dep) return { names: [] };
+    return { names: [dep.replace(/市$/, '') || dep] };
+  }
+
   if (formData.destinationMode === 'specific' && formData.destinations?.length) {
-    // 多城行程：为每个目的地拉取预报，便于按日对照（最多 5 城，避免请求过多）
-    return { names: formData.destinations.slice(0, 5) };
+    const names = formData.destinations
+      .flatMap((d) => String(d).split(/[、,，]/g))
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return { names: [...new Set(names)].slice(0, 5) };
   }
   const dep = formData.departure?.trim();
   if (!dep) return { names: [] };
@@ -213,7 +269,10 @@ export async function fetchTripWeatherForPlan(formData: TripFormData): Promise<{
     names.map(async (rawName) => {
       const geo = await geocodeCity(rawName);
       if (!geo) return null;
-      const displayName = [geo.admin1, geo.name].filter(Boolean).join(' · ') || geo.name;
+      const admin1Clean = geo.admin1?.replace(/[省市区]$/, '') || '';
+      const nameClean = geo.name?.replace(/[省市区]$/, '') || '';
+      const showAdmin = admin1Clean && admin1Clean !== nameClean && !nameClean.includes(admin1Clean);
+      const displayName = showAdmin ? `${geo.admin1} · ${geo.name}` : geo.name;
       const days = await fetchDailyForecast(geo.latitude, geo.longitude, range.start, range.end);
       if (!days.length) return null;
       return {

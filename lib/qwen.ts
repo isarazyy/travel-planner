@@ -1,6 +1,19 @@
+export type QwenUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+
+let _lastUsage: QwenUsage | null = null;
+
+/** Get the token usage from the most recent callQwen invocation */
+export function getLastQwenUsage(): QwenUsage | null {
+  return _lastUsage;
+}
+
 export async function callQwen(
   prompt: string,
-  options?: { maxTokens?: number; temperature?: number; timeoutMs?: number; model?: string }
+  options?: { maxTokens?: number; temperature?: number; timeoutMs?: number; model?: string; enableSearch?: boolean }
 ): Promise<string> {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   if (!apiKey) throw new Error('DASHSCOPE_API_KEY not configured');
@@ -18,7 +31,7 @@ export async function callQwen(
       },
       signal: controller.signal,
       body: JSON.stringify({
-        model: options?.model ?? 'qwen-plus',
+        model: options?.model ?? 'qwen-turbo',
         messages: [
           {
             role: 'system',
@@ -28,6 +41,7 @@ export async function callQwen(
         ],
         temperature: options?.temperature ?? 0.4,
         max_tokens: options?.maxTokens ?? 3200,
+        ...(options?.enableSearch ? { enable_search: true } : {}),
       }),
     });
   } catch (err: unknown) {
@@ -45,6 +59,7 @@ export async function callQwen(
   }
 
   const json = await res.json();
+  _lastUsage = json.usage ?? null;
   const content = json.choices?.[0]?.message?.content;
   if (!content) throw new Error('Empty response from Qwen');
   return content;
@@ -93,66 +108,102 @@ export function parseJsonResponse(raw: string): any {
     // Remove trailing commas before closing tokens
     cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
 
+    // Truncation recovery: if the string was cut mid-value, trim back
+    // to the last complete key-value pair before auto-closing
+    const truncateToLastComplete = (s: string): string => {
+      let inStr = false;
+      let esc = false;
+      let lastSafeEnd = -1;
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) {
+          if (esc) { esc = false; continue; }
+          if (ch === '\\') { esc = true; continue; }
+          if (ch === '"') { inStr = false; continue; }
+          continue;
+        }
+        if (ch === '"') { inStr = true; continue; }
+        if (ch === ',' || ch === '{' || ch === '[') {
+          lastSafeEnd = i;
+        }
+      }
+      if (inStr && lastSafeEnd > 0) {
+        return s.slice(0, lastSafeEnd + 1);
+      }
+      return s;
+    };
+    cleaned = truncateToLastComplete(cleaned);
+
     // Auto-close unbalanced braces/brackets (common when output is truncated)
-    const stack: string[] = [];
-    let inString = false;
-    let escaped = false;
-
-    for (let i = 0; i < cleaned.length; i++) {
-      const ch = cleaned[i];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (ch === '\\') {
-          escaped = true;
-        } else if (ch === '"') {
-          inString = false;
+    const autoClose = (s: string): string => {
+      const stk: string[] = [];
+      let inStr = false;
+      let esc = false;
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (inStr) {
+          if (esc) { esc = false; } else if (ch === '\\') { esc = true; } else if (ch === '"') { inStr = false; }
+          continue;
         }
-        continue;
-      }
-
-      if (ch === '"') {
-        inString = true;
-      } else if (ch === '{' || ch === '[') {
-        stack.push(ch);
-      } else if (ch === '}' || ch === ']') {
-        const last = stack[stack.length - 1];
-        if ((ch === '}' && last === '{') || (ch === ']' && last === '[')) {
-          stack.pop();
+        if (ch === '"') inStr = true;
+        else if (ch === '{' || ch === '[') stk.push(ch);
+        else if (ch === '}' || ch === ']') {
+          const last = stk[stk.length - 1];
+          if ((ch === '}' && last === '{') || (ch === ']' && last === '[')) stk.pop();
         }
       }
-    }
+      let result = s;
+      if (inStr) result += '"';
+      while (stk.length) {
+        const opener = stk.pop();
+        result += opener === '{' ? '}' : ']';
+      }
+      return result;
+    };
 
-    if (inString) cleaned += '"';
-    while (stack.length) {
-      const opener = stack.pop();
-      cleaned += opener === '{' ? '}' : ']';
-    }
-
+    cleaned = autoClose(cleaned);
     cleaned = fillMissingValues(cleaned);
     cleaned = normalizeObjectKeys(cleaned);
     cleaned = trimTrailingGarbage(cleaned);
 
-    try {
-      return attemptParse(cleaned);
-    } catch (e: any) {
-      // Targeted patch using parser-reported position:
-      // fix cases like `"foo" "bar"` / `"foo", "bar"` where colon is missing
-      const m = String(e?.message || '').match(/position (\d+)/);
-      const pos = m ? Number(m[1]) : -1;
-      if (Number.isFinite(pos) && pos > 1 && pos < cleaned.length - 1) {
-        const before = cleaned.slice(0, pos);
-        const after = cleaned.slice(pos);
-        const lastQuote = before.lastIndexOf('"');
-        const prevQuote = before.lastIndexOf('"', lastQuote - 1);
-        if (lastQuote > 0 && prevQuote >= 0) {
-          const between = before.slice(lastQuote + 1);
-          if (/^\s*,?\s*$/.test(between)) {
-            cleaned = `${before.slice(0, lastQuote + 1)}:${after}`;
+    const attempts: (() => any)[] = [
+      () => attemptParse(cleaned),
+      () => {
+        // Position-based patch: fix missing colon between key and value
+        const e2 = getParseError(cleaned);
+        if (!e2) return attemptParse(cleaned);
+        const m = String(e2.message || '').match(/position (\d+)/);
+        const pos = m ? Number(m[1]) : -1;
+        if (Number.isFinite(pos) && pos > 1 && pos < cleaned.length - 1) {
+          const before = cleaned.slice(0, pos);
+          const after = cleaned.slice(pos);
+          const lastQuote = before.lastIndexOf('"');
+          const prevQuote = before.lastIndexOf('"', lastQuote - 1);
+          if (lastQuote > 0 && prevQuote >= 0) {
+            const between = before.slice(lastQuote + 1);
+            if (/^\s*,?\s*$/.test(between)) {
+              cleaned = `${before.slice(0, lastQuote + 1)}:${after}`;
+            }
           }
         }
-      }
-      return attemptParse(cleaned);
+        return attemptParse(cleaned);
+      },
+      () => {
+        // Last resort: aggressively trim to last complete } or ] and re-close
+        const trimmed = trimTrailingGarbage(cleaned);
+        return attemptParse(autoClose(fillMissingValues(trimmed)));
+      },
+    ];
+
+    for (const attempt of attempts) {
+      try {
+        return attempt();
+      } catch { /* try next */ }
     }
+    throw new Error('AI 返回的数据格式有误，请重试');
   }
+}
+
+function getParseError(s: string): Error | null {
+  try { JSON.parse(s); return null; } catch (e: any) { return e; }
 }

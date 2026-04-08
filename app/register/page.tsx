@@ -1,17 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient, isConfigured } from '@/lib/supabase-browser';
-import { useRouter } from 'next/navigation';
+import { isConfigured } from '@/lib/supabase-browser';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { Suspense } from 'react';
 
-export default function RegisterPage() {
+function RegisterForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get('returnTo') || '';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,22 +26,28 @@ export default function RegisterPage() {
     }
 
     setLoading(true);
-    const supabase = createClient();
-    if (!supabase) {
-      setError('Supabase 未配置：本地请改 .env.local；线上请在 Vercel → Environment Variables 添加 NEXT_PUBLIC_SUPABASE_* 后重新部署');
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || '注册失败');
+        setLoading(false);
+        return;
+      }
+
+      const loginUrl = returnTo
+        ? `/login?registered=1&returnTo=${encodeURIComponent(returnTo)}`
+        : '/login?registered=1';
+      router.push(loginUrl);
+    } catch {
+      setError('网络错误，请稍后重试');
       setLoading(false);
-      return;
     }
-
-    const { error } = await supabase.auth.signUp({ email, password });
-
-    if (error) {
-      setError(error.message);
-      setLoading(false);
-      return;
-    }
-
-    router.push('/login?registered=1');
   }
 
   return (
@@ -46,24 +55,19 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900">创建账户</h1>
-          <p className="text-gray-500 mt-2">开始定制你的旅行规划</p>
+          <p className="text-gray-500 mt-2">注册后可无限使用旅行规划功能</p>
         </div>
 
         <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-5">
           {!isConfigured && (
-            <div className="bg-amber-50 text-amber-700 px-4 py-3 rounded-lg text-sm space-y-2">
-              <p>⚠️ Supabase 尚未配置，登录/注册不可用。</p>
-              <ul className="list-disc pl-4 text-xs space-y-1">
-                <li>
-                  <strong>本地：</strong> <code className="bg-amber-100 px-1 rounded">.env.local</code> 中填写{' '}
-                  <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_URL</code> 与{' '}
-                  <code className="bg-amber-100 px-1 rounded">NEXT_PUBLIC_SUPABASE_ANON_KEY</code>
-                </li>
-                <li>
-                  <strong>Vercel：</strong> Settings → Environment Variables → 添加上述两项（Production）→ Redeploy
-                </li>
-              </ul>
-              <p className="text-xs">Supabase：Project Settings → API 可复制 URL 与 anon key。</p>
+            <div className="rounded-xl border border-orange-200 bg-gradient-to-br from-orange-50 to-amber-50/80 p-4 space-y-3">
+              <p className="text-sm font-medium text-gray-900">未配置账号系统</p>
+              <Link
+                href="/plan"
+                className="flex w-full items-center justify-center py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold transition"
+              >
+                暂不注册，直接去规划 →
+              </Link>
             </div>
           )}
 
@@ -126,5 +130,13 @@ export default function RegisterPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">加载中...</div>}>
+      <RegisterForm />
+    </Suspense>
   );
 }
