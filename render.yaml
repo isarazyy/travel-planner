@@ -8,5 +8,21 @@ services:
     envVars:
       - key: DASHSCOPE_API_KEY
         sync: false
+      - key: NEXT_PUBLIC_AMAP_KEY
+        sync: false
+      - key: NEXT_PUBLIC_AMAP_SECURITY_JSCODE
+        sync: false
+      - key: AMAP_KEY
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: GUEST_FREE_USES
+        value: "3"
       - key: NODE_ENV
         value: production
