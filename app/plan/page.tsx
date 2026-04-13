@@ -472,7 +472,7 @@ function PlanContent() {
                   {STEPS.map((s, i) => (
                     <button
                       key={s.key}
-                      onClick={() => i < step && setStep(i)}
+                      onClick={() => { if (i < step) { setStep(i); window.scrollTo({ top: 0 }); } }}
                       className={`text-xs transition ${
                         i <= step ? 'text-orange-500 cursor-pointer' : 'text-gray-300 cursor-default'
                       }`}
@@ -505,7 +505,7 @@ function PlanContent() {
               {/* Navigation */}
               <div className="flex justify-between mt-8 pt-6 border-t border-gray-100">
                 <button
-                  onClick={() => setStep(s => s - 1)}
+                  onClick={() => { setStep(s => s - 1); window.scrollTo({ top: 0 }); }}
                   disabled={step === 0}
                   className="px-6 py-3 text-sm font-medium text-gray-600 hover:text-gray-900 disabled:opacity-30 disabled:cursor-not-allowed transition"
                 >
@@ -532,7 +532,7 @@ function PlanContent() {
                   </button>
                 ) : (
                   <button
-                    onClick={() => setStep(s => s + 1)}
+                    onClick={() => { setStep(s => s + 1); window.scrollTo({ top: 0 }); }}
                     disabled={!canProceed()}
                     className="px-8 py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
                   >
