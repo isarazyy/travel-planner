@@ -40,8 +40,8 @@ export async function GET(request: NextRequest) {
       const lat = parseFloat(latStr);
 
       if (Number.isFinite(lng) && Number.isFinite(lat)) {
-        const navUrl = `https://uri.amap.com/navigation?to=${lng},${lat},${encodeURIComponent(name)}&mode=${mode}&callnative=1&src=travel-planner`;
-        return NextResponse.redirect(navUrl, 302);
+        const markerUrl = `https://uri.amap.com/marker?position=${lng},${lat}&name=${encodeURIComponent(name)}&callnative=1&src=travel-planner`;
+        return NextResponse.redirect(markerUrl, 302);
       }
     }
   } catch (e) {
