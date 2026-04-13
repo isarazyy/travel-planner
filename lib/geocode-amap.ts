@@ -8,6 +8,10 @@ export type GeocodeResult = {
 
 const geoCache = new Map<string, GeocodeResult | null>();
 
+export function clearGeoCache() {
+  geoCache.clear();
+}
+
 function geoCacheKey(address: string, city?: string): string {
   return `${address}||${city ?? ''}`;
 }

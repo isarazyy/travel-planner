@@ -9,7 +9,7 @@ import {
 } from '@/lib/trip-route-points';
 import { enrichPlaceQueryForGeocode, extractRegionHintFromFormatted } from '@/lib/amap-region';
 import { resolveGeocodeWithFallbacks } from '@/lib/amap-geocode-resolve';
-import { geocodeAmapServer } from '@/lib/geocode-amap';
+import { geocodeAmapServer, clearGeoCache } from '@/lib/geocode-amap';
 import { loadAmapScript, getAmapBrowserKey, type AMapMapInstance } from '@/lib/amap-loader';
 
 function kindLabel(k: RoutePointKind): string {
@@ -161,6 +161,7 @@ export default function TripRouteMap({
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [mapError, setMapError] = useState<string | null>(null);
   const [corridorSkipped, setCorridorSkipped] = useState<string[]>([]);
+  const [geoEpoch, setGeoEpoch] = useState(0);
 
   const [drivingResults, setDrivingResults] = useState<DrivingStrategyResult[]>([]);
   const [activeRouteIdx, setActiveRouteIdx] = useState(0);
@@ -243,6 +244,26 @@ export default function TripRouteMap({
       }
 
       if (cancelled) return;
+
+      // Outlier detection: discard points far from the median cluster
+      if (!isMountainRun && corridorOk.length >= 3) {
+        const lngs = corridorOk.map((p) => p.lng).sort((a, b) => a - b);
+        const lats = corridorOk.map((p) => p.lat).sort((a, b) => a - b);
+        const medLng = lngs[Math.floor(lngs.length / 2)];
+        const medLat = lats[Math.floor(lats.length / 2)];
+        const MAX_OUTLIER_KM = 800;
+        for (let k = corridorOk.length - 1; k >= 0; k--) {
+          const d = haversineKm(medLat, medLng, corridorOk[k].lat, corridorOk[k].lng);
+          if (d > MAX_OUTLIER_KM && corridorOk[k].kind !== 'departure') {
+            corridorOk.splice(k, 1);
+          }
+        }
+        // Re-number after removing outliers
+        for (let k = 0; k < corridorOk.length; k++) {
+          corridorOk[k].order = k + 1;
+        }
+      }
+
       const skipped = corridorLabels
         .map((c) => c.label)
         .filter((lab) => !corridorOk.some((p) => p.label === lab));
@@ -286,7 +307,7 @@ export default function TripRouteMap({
     return () => {
       cancelled = true;
     };
-  }, [corridorLabels, hasJsKey, showDailyPois, activityLabelList]);
+  }, [corridorLabels, hasJsKey, showDailyPois, activityLabelList, geoEpoch]);
 
   // Fetch driving routes when self_drive/motorcycle mode + corridor resolved
   useEffect(() => {
@@ -552,6 +573,15 @@ AMAP_KEY=`}
           </span>
         )}
         {mapError && <span className="text-xs text-red-600">{mapError}</span>}
+        {phase === 'ready' && !drivingLoading && (
+          <button
+            onClick={() => { clearGeoCache(); setGeoEpoch((e) => e + 1); }}
+            className="text-[11px] text-gray-400 hover:text-orange-600 transition shrink-0"
+            title="清除缓存重新定位"
+          >
+            ↻ 重新加载
+          </button>
+        )}
       </div>
 
       {/* Driving route selector */}
