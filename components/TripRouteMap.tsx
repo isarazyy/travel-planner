@@ -36,7 +36,7 @@ function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-const GEO_GAP_MS = 120;
+const GEO_GAP_MS = 250;
 
 interface TripLike {
   departure: string;
