@@ -46,9 +46,16 @@ export async function GET(request: NextRequest) {
       geocodes?: Array<{ location: string; formatted_address?: string }>;
     };
 
-    if (data.status !== '1' || !data.geocodes?.length) {
+    if (data.status !== '1') {
       return NextResponse.json(
-        { error: data.info || '未解析到坐标', status: data.status },
+        { error: data.info || '高德 API 错误', status: data.status },
+        { status: 502 },
+      );
+    }
+
+    if (!data.geocodes?.length) {
+      return NextResponse.json(
+        { error: '未解析到坐标' },
         { status: 404 },
       );
     }
