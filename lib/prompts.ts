@@ -25,7 +25,7 @@ export function calendarTripDays(startDate: string, endDate: string): number {
   return Math.max(1, Math.ceil((e - s) / 86400000) + 1);
 }
 
-/** 按用户「旅行节奏」约束每日 activities 条数下限（产品核心：拒绝「一天只有一两个点」的敷衍排程） */
+/** 按用户「旅行节奏」约束每日 activities 条数 */
 function resolvePaceDailyDensity(
   paceKey: string,
   longTrip: boolean,
@@ -48,15 +48,15 @@ function resolvePaceDailyDensity(
       };
     case 'relaxed':
       return {
-        min: 3,
-        max: 4,
+        min: 2,
+        max: 3,
         coverage:
-          '节奏舒缓但**禁止**「全天仅 1～2 条」：仍须每天 ≥3 条，可缩短单条时长、增加咖啡/公园留白。',
+          '每天只安排 1-2 个核心景点/体验，其余时间留白给用户自由探索。可加入咖啡馆、公园散步、街区闲逛等轻量活动，但**不要塞满行程**。节奏要明显比"适中"慢，让用户感受到"今天不赶"。',
       };
     case 'half':
       return {
         min: 2,
-        max: 4,
+        max: 3,
         coverage:
           '「半天玩半天休」：游玩时段须 ≥2 条具体安排，另一半天写「午休/酒店泳池/自由逛街」等，不得用一条「自由活动」糊弄整天。',
       };
@@ -137,9 +137,9 @@ export function buildMultiPlanPrompt(
 
   const productCoreBlock = `
 
-【产品核心 — 每日推荐必须「饱满」】
-- 本产品与「只列 1～2 个景点」的极简行程工具不同：你必须输出**像真实旅行攻略一样可分时段执行的一天**，这是差异化所在。
-- 用户选择的节奏为「${paceDesc}」。在此前提下，itinerary 中**每个自然日**的 activities 数量须满足：**至少 ${density.min} 条、建议 ${density.max} 条以内**（为控制篇幅，单条描述可简短，但**条数不能缩水**）。
+【产品核心 — 行程密度由用户节奏决定】
+- 用户选择的节奏为「${paceDesc}」。**这是最重要的约束**，直接决定每天安排多少景点/活动。
+- itinerary 中**每个自然日**的 activities 数量须满足：**至少 ${density.min} 条、建议 ${density.max} 条以内**。${density.min <= 2 ? '用户选择了慢节奏，不要塞满行程，每天1-2个核心景点即可，其余时间留白。' : ''}
 - 时段覆盖要求：${density.coverage}
 - **抵达/首末日**：若涉及机场/高铁到达，须额外写出「入住后傍晚」或「返程前上午」至少 1 项可执行安排，不得让整天停在「抵达机场」一条上结束。
 - **纯转场日**：可略少 1 条，但仍须写清交通段 + 到达后 1～2 项轻量活动（安顿、简餐、周边散步）。
