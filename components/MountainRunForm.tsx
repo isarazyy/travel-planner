@@ -6,6 +6,7 @@ import { parseSSEResponse } from '@/lib/parse-sse';
 import { saveGenerateResultLocally } from '@/lib/local-storage-trips';
 import PlanResultDirect from '@/components/PlanResultDirect';
 import RegisterPrompt from '@/components/RegisterPrompt';
+import CityPicker from '@/components/CityPicker';
 
 type VehicleType = 'motorcycle' | 'car' | 'bicycle';
 
@@ -214,13 +215,13 @@ export default function MountainRunForm() {
           {/* Departure city */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">出发城市 <span className="text-red-400">*</span></label>
-            <input
-              type="text"
+            <CityPicker
+              inline
               value={departure}
-              onChange={(e) => setDeparture(e.target.value)}
-              placeholder="如：北京、杭州、成都"
-              maxLength={20}
-              className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+              onChange={setDeparture}
+              onSelect={setDeparture}
+              placeholder="输入或选择出发城市"
+              className="w-full rounded-xl border border-gray-200 pl-4 pr-9 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
             />
           </div>
 
@@ -276,13 +277,13 @@ export default function MountainRunForm() {
             <label className="block text-sm font-medium text-gray-700 mb-1">
               想往哪个方向跑？ <span className="text-gray-400 text-xs font-normal">选填</span>
             </label>
-            <input
-              type="text"
+            <CityPicker
+              inline
               value={direction}
-              onChange={(e) => setDirection(e.target.value)}
+              onChange={setDirection}
+              onSelect={setDirection}
               placeholder="如：延庆方向、门头沟、不填则AI推荐"
-              maxLength={30}
-              className="w-full rounded-xl border border-gray-200 px-4 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+              className="w-full rounded-xl border border-gray-200 pl-4 pr-9 py-3 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
             />
           </div>
 

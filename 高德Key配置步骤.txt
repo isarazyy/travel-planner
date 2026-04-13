@@ -1,0 +1,39 @@
+本应用需要你在高德开放平台自己创建 Key，并把值填进项目根目录的 .env.local（不要提交到 Git）。
+
+一、打开控制台
+  https://console.amap.com/
+  登录后进入：应用管理 → 我的应用 → 创建新应用（若还没有应用）
+  在应用下「添加」Key
+
+二、添加第一个 Key（建议名称：旅行规划-Web）
+  服务平台勾选：
+    ☑ Web端(JS API)     —— 用于浏览器里显示地图
+    ☑ Web服务           —— 用于地理编码（地址转经纬度）
+  提交后复制「Key」一长串，填到 .env.local 的：
+    NEXT_PUBLIC_AMAP_KEY=这里粘贴
+
+三、安全密钥（2021年12月后申请的 Key 一般需要）
+  在同一 Key 详情或「安全密钥」页，复制「安全密钥 jscode」
+  填到：
+    NEXT_PUBLIC_AMAP_SECURITY_JSCODE=这里粘贴
+
+四、服务端地理编码（可选，可与上面 Key 相同）
+  若希望地理编码只用服务端变量，可再填：
+    AMAP_KEY=与 NEXT_PUBLIC_AMAP_KEY 相同即可
+  不填则自动使用 NEXT_PUBLIC_AMAP_KEY
+
+五、本地调试白名单（重要）
+  在 Key 设置里找到「域名白名单」或「授权域名」，添加：
+    127.0.0.1
+    localhost
+  （若以后部署到线上，再加你的域名，如 xxx.vercel.app）
+
+六、保存并重启
+  保存 .env.local 后，在项目目录执行：
+    npm run dev
+  重新打开方案页，地图应能加载。
+
+填好的 .env.local 示例（请换成你自己的值，勿泄露给他人）：
+  NEXT_PUBLIC_AMAP_KEY=你的Key
+  NEXT_PUBLIC_AMAP_SECURITY_JSCODE=你的安全密钥
+  AMAP_KEY=你的Key

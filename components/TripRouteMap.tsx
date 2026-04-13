@@ -131,6 +131,17 @@ export default function TripRouteMap({
         labels.push({ label: trip.departure, kind: 'departure' });
       }
     }
+
+    // Self-drive / motorcycle: close loop back to departure if last point isn't already departure
+    if ((isSelfDrive || isMotorcycle) && labels.length > 1) {
+      const last = labels[labels.length - 1];
+      const depKey = trip.departure.replace(/[市区县省]$/, '').trim();
+      const lastKey = last.label.replace(/[市区县省]$/, '').trim();
+      if (last.kind !== 'departure' && lastKey !== depKey && !lastKey.includes(depKey) && !depKey.includes(lastKey)) {
+        labels.push({ label: trip.departure, kind: 'departure' });
+      }
+    }
+
     return labels;
   }, [trip.departure, trip.destinations, trip.destination, recommendedRoute, isMotorcycle, isMountainRun, itinerary]);
 
@@ -630,18 +641,41 @@ AMAP_KEY=`}
   );
 }
 
+function pickEvenlySpaced<T>(arr: T[], maxCount: number): T[] {
+  if (arr.length <= maxCount) return arr;
+  const result: T[] = [];
+  for (let i = 0; i < maxCount; i++) {
+    const idx = Math.round((i * (arr.length - 1)) / (maxCount - 1));
+    result.push(arr[idx]);
+  }
+  return result;
+}
+
 function buildAmapRouteUrl(points: CorridorPoint[], isDriving: boolean): string {
   const from = points[0];
   const to = points[points.length - 1];
-  const mode = isDriving ? 'car' : 'bus';
+  const mid = points.slice(1, -1);
 
+  if (isDriving && mid.length > 3) {
+    const waypoints = pickEvenlySpaced(mid, 16);
+    const params = new URLSearchParams({ type: '1', policy: '1' });
+    params.set('from', `${from.lng},${from.lat},${encodeURIComponent(from.label)}`);
+    params.set('to', `${to.lng},${to.lat},${encodeURIComponent(to.label)}`);
+    const viaStr = waypoints
+      .map((p) => `${p.lng},${p.lat},${encodeURIComponent(p.label)}`)
+      .join(';');
+    params.set('via', viaStr);
+    return `https://uri.amap.com/navigation?${params.toString()}&mode=car&callnative=1&coordinate=gaode&src=travel-planner`;
+  }
+
+  const mode = isDriving ? 'car' : 'bus';
   let url = 'https://uri.amap.com/navigation?';
   url += `from=${from.lng},${from.lat},${encodeURIComponent(from.label)}`;
   url += `&to=${to.lng},${to.lat},${encodeURIComponent(to.label)}`;
 
-  if (points.length > 2) {
-    const mid = points.slice(1, -1).slice(0, 3);
-    const via = mid
+  if (mid.length > 0) {
+    const selected = pickEvenlySpaced(mid, 3);
+    const via = selected
       .map((p) => `${p.lng},${p.lat},${encodeURIComponent(p.label)}`)
       .join(';');
     url += `&via=${via}`;

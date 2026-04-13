@@ -167,17 +167,34 @@ export async function POST(request: NextRequest) {
     const aiItinerary: any[] = Array.isArray(updatedPlan.itinerary) ? updatedPlan.itinerary : [];
     const origItinerary: any[] = Array.isArray(activePlan.itinerary) ? activePlan.itinerary : [];
 
-    // Detect full rewrite (reorder scenario): if AI returned enough days and none are _keep, use AI result directly
     const keptDays = aiItinerary.filter((d: any) => d?._keep === true);
     const fullDays = aiItinerary.filter((d: any) => !d?._keep && d?.activities?.length > 0);
-    const isFullRewrite = aiItinerary.length >= origItinerary.length && keptDays.length === 0 && fullDays.length >= origItinerary.length;
+    const isFullRewrite = keptDays.length === 0 && fullDays.length >= 1;
+    const isDayCountReduced = fullDays.length > 0 && (fullDays.length + keptDays.length) < origItinerary.length;
 
     let mergedItinerary: any[];
     if (isFullRewrite) {
       if (process.env.NODE_ENV === 'development') {
-        console.log('[plan-chat] 检测到全量重写（可能是重排顺序），直接使用AI返回的itinerary');
+        console.log('[plan-chat] 检测到全量重写，直接使用AI返回的itinerary');
       }
       mergedItinerary = aiItinerary;
+    } else if (isDayCountReduced) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`[plan-chat] 检测到天数减少（原${origItinerary.length}→AI${fullDays.length + keptDays.length}），拼合后截断`);
+      }
+      mergedItinerary = [];
+      for (const aiDay of aiItinerary) {
+        if (aiDay?._keep === true) {
+          const origDay = origItinerary.find((d: any) => d?.day === aiDay.day);
+          if (origDay) mergedItinerary.push(origDay);
+        } else if (aiDay?.activities?.length > 0) {
+          mergedItinerary.push(aiDay);
+        }
+      }
+      mergedItinerary = mergedItinerary.map((d: any, idx: number) => ({
+        ...d,
+        day: idx + 1,
+      }));
     } else {
       mergedItinerary = origItinerary.map((origDay: any, idx: number) => {
         const aiDay = aiItinerary.find((d: any) => d?.day === origDay?.day) 
@@ -186,7 +203,6 @@ export async function POST(request: NextRequest) {
         if (!aiDay.activities || (Array.isArray(aiDay.activities) && aiDay.activities.length === 0)) return origDay;
         return aiDay;
       });
-      // Append any extra days from AI that don't exist in original
       for (const aiDay of aiItinerary) {
         if (aiDay?._keep) continue;
         const exists = mergedItinerary.some((d: any) => d?.day === aiDay?.day);

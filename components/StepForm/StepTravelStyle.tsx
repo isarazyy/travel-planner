@@ -34,8 +34,18 @@ export default function StepTravelStyle({
   function setCompanion(value: string) {
     const updates: Record<string, unknown> = { companion: value };
     if (value !== 'family') updates.childAge = undefined;
-    if (value === 'solo') {
-      onChange({ ...data, peopleCount: 1, preferences: { ...prefs, ...updates } });
+    const autoCounts: Record<string, number> = { solo: 1, couple: 2 };
+    const autoCount = autoCounts[value];
+    if (autoCount) {
+      onChange({ ...data, peopleCount: autoCount, preferences: { ...prefs, ...updates } });
+      return;
+    }
+    if (value === 'family' && data.peopleCount < 2) {
+      onChange({ ...data, peopleCount: 3, preferences: { ...prefs, ...updates } });
+      return;
+    }
+    if (value === 'elderly' && data.peopleCount < 2) {
+      onChange({ ...data, peopleCount: 2, preferences: { ...prefs, ...updates } });
       return;
     }
     patch(updates);
@@ -167,6 +177,30 @@ export default function StepTravelStyle({
             ))}
           </div>
         )}
+        {prefs.companion && !['solo', 'couple'].includes(prefs.companion) && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-sm text-gray-600">出行人数</span>
+            <input
+              type="number"
+              min={2}
+              max={20}
+              value={data.peopleCount ?? 2}
+              onChange={(e) => {
+                const raw = parseInt(e.target.value, 10);
+                const clamped = Number.isNaN(raw) ? 2 : Math.max(2, Math.min(20, raw));
+                onChange({ ...data, peopleCount: clamped });
+              }}
+              className="w-20 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+            />
+            <span className="text-xs text-gray-400">人</span>
+          </div>
+        )}
+        {prefs.companion === 'solo' && (
+          <p className="mt-2 text-xs text-gray-400">已自动设为 1 人</p>
+        )}
+        {prefs.companion === 'couple' && (
+          <p className="mt-2 text-xs text-gray-400">已自动设为 2 人</p>
+        )}
       </div>
 
       {/* Pace */}
@@ -195,6 +229,7 @@ export default function StepTravelStyle({
           })}
         </div>
       </div>
+
     </div>
   );
 }

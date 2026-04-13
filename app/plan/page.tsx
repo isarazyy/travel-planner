@@ -1,12 +1,10 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import StepBasic from '@/components/StepForm/StepBasic';
 import StepTravelStyle from '@/components/StepForm/StepTravelStyle';
-import StepPreferences from '@/components/StepForm/StepPreferences';
 import StepBudgetAccom from '@/components/StepForm/StepBudgetAccom';
-import StepExtra from '@/components/StepForm/StepExtra';
 import PlanResultDirect from '@/components/PlanResultDirect';
 import RegisterPrompt from '@/components/RegisterPrompt';
 import MountainRunForm from '@/components/MountainRunForm';
@@ -18,9 +16,7 @@ import { saveGenerateResultLocally } from '@/lib/local-storage-trips';
 const STEPS = [
   { key: 'basic', label: '基本信息', icon: '📍' },
   { key: 'style', label: '出行方式', icon: '🚗' },
-  { key: 'prefs', label: '偏好', icon: '❤️' },
-  { key: 'budget', label: '预算住宿', icon: '💰' },
-  { key: 'extra', label: '补充与生成', icon: '✨' },
+  { key: 'budget', label: '预算与补充', icon: '💰' },
 ];
 
 const initialData: TripFormData = {
@@ -93,6 +89,7 @@ function PlanContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<any>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Quick mode fields
   const [quickDeparture, setQuickDeparture] = useState('');
@@ -100,6 +97,41 @@ function PlanContent() {
   const [quickDays, setQuickDays] = useState('3');
   const [quickNoIdea, setQuickNoIdea] = useState(false);
   const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  }, []);
+
+  const startPolling = useCallback((jobId: string) => {
+    stopPolling();
+    setLoading(true);
+    localStorage.setItem('gen_job_id', jobId);
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/job/status?id=${jobId}`);
+        const j = await r.json();
+        if (j.status === 'done' && j.result) {
+          stopPolling();
+          localStorage.removeItem('gen_job_id');
+          setResult(j.result);
+          setLoading(false);
+        } else if (j.status === 'error') {
+          stopPolling();
+          localStorage.removeItem('gen_job_id');
+          setError(j.errorMessage || '生成失败');
+          setLoading(false);
+        }
+      } catch { /* network hiccup, retry next interval */ }
+    }, 3000);
+  }, [stopPolling]);
+
+  // On mount: resume polling if there's an unfinished job
+  useEffect(() => {
+    const savedJobId = localStorage.getItem('gen_job_id');
+    if (savedJobId) startPolling(savedJobId);
+    return stopPolling;
+  }, [startPolling, stopPolling]);
 
   const canProceed = () => {
     if (step === 0) {
@@ -119,26 +151,34 @@ function PlanContent() {
     return true;
   };
 
-  async function handleGenerate(modeOverride?: 'fast' | 'standard') {
+  async function doGenerate(payload: TripFormData) {
     setLoading(true);
     setError('');
     try {
-      const payload = modeOverride
-        ? { ...data, generationMode: modeOverride }
-        : data;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 300000);
-      let res: Response;
-      try {
-        res = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
+      const res = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+
+      // Async mode: server returned jobId immediately
+      if (contentType.includes('application/json')) {
+        const json = await res.json();
+        if (json.async && json.jobId) {
+          startPolling(json.jobId);
+          return;
+        }
+        if (json.error) {
+          if (json.error.includes('免费试用已用完')) { setShowRegisterPrompt(true); }
+          else { setError(json.error); }
+          setLoading(false);
+          return;
+        }
       }
+
+      // SSE mode (guest flow): parse stream as before
       const json = await parseSSEResponse(res);
       if (json.saveLocal && !json.savedTripId) {
         try {
@@ -148,15 +188,20 @@ function PlanContent() {
         } catch { /* localStorage full */ }
       }
       setResult(json);
+      setLoading(false);
     } catch (err: any) {
       if (err.message?.includes('免费试用已用完')) {
         setShowRegisterPrompt(true);
       } else {
         setError(err.message || '生成失败，请重试');
       }
-    } finally {
       setLoading(false);
     }
+  }
+
+  async function handleGenerate(modeOverride?: 'fast' | 'standard') {
+    const payload = modeOverride ? { ...data, generationMode: modeOverride } : data;
+    await doGenerate(payload as TripFormData);
   }
 
   async function handleQuickGenerate() {
@@ -183,40 +228,7 @@ function PlanContent() {
     }
 
     setData(payload);
-    setLoading(true);
-    setError('');
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 300000);
-      let res: Response;
-      try {
-        res = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-      const json = await parseSSEResponse(res);
-      if (json.saveLocal && !json.savedTripId) {
-        try {
-          const localId = saveGenerateResultLocally(json);
-          json.savedTripId = localId;
-          json.savedLocal = true;
-        } catch { /* localStorage full */ }
-      }
-      setResult(json);
-    } catch (err: any) {
-      if (err.message?.includes('免费试用已用完')) {
-        setShowRegisterPrompt(true);
-      } else {
-        setError(err.message || '生成失败，请重试');
-      }
-    } finally {
-      setLoading(false);
-    }
+    await doGenerate(payload);
   }
 
   function handleReset() {
@@ -234,7 +246,8 @@ function PlanContent() {
   }
 
   async function handleRefreshFast() {
-    await handleGenerate('fast');
+    const payload = { ...data, generationMode: 'fast' as const, regenerate: true };
+    await doGenerate(payload as TripFormData);
   }
 
   async function handleUpgradeStandard() {
@@ -263,29 +276,14 @@ function PlanContent() {
           </button>
         </div>
 
-        <div className="mb-6 flex flex-wrap items-center justify-center gap-4">
-          <button
-            onClick={handleRefreshFast}
-            disabled={loading}
-            className="px-5 py-2.5 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-xl hover:bg-orange-100 transition disabled:opacity-50"
-          >
-            {loading ? '生成中…' : '🔄 再换一套极速方案'}
-          </button>
-          <button
-            onClick={handleUpgradeStandard}
-            disabled={loading}
-            className="px-5 py-2.5 text-sm font-medium text-white bg-gray-900 rounded-xl hover:bg-black transition disabled:opacity-50"
-          >
-            {loading ? '生成中…' : '📋 生成标准双方案（更详细）'}
-          </button>
-        </div>
-
         <PlanResultDirect
           key={`${result.plans?.length}-${result.plans?.[0]?.planName}`}
           trip={result.trip}
           plans={result.plans}
           recommendations={result.recommendations}
           hotelWebSearchUsed={!!result.hotelWebSearchUsed}
+          onRegenerate={handleRefreshFast}
+          regenerating={loading}
         />
       </div>
     );
@@ -294,9 +292,7 @@ function PlanContent() {
   const stepComponents = [
     <StepBasic key="basic" data={data} onChange={setData} />,
     <StepTravelStyle key="style" data={data} onChange={setData} />,
-    <StepPreferences key="prefs" data={data} onChange={setData} />,
     <StepBudgetAccom key="budget" data={data} onChange={setData} />,
-    <StepExtra key="extra" data={data} onChange={setData} />,
   ];
 
   const isLastStep = step === STEPS.length - 1;
@@ -493,6 +489,14 @@ function PlanContent() {
                 {stepComponents[step]}
               </div>
 
+              {/* Background generation notice */}
+              {loading && localStorage.getItem('gen_job_id') && (
+                <div className="mt-4 bg-blue-50 text-blue-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
+                  <svg className="animate-spin h-4 w-4 shrink-0" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                  <span>方案正在后台生成，你可以随意浏览其他页面，生成完成后会自动显示结果</span>
+                </div>
+              )}
+
               {/* Error */}
               {error && (
                 <div className="mt-4 bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">{error}</div>
@@ -509,49 +513,23 @@ function PlanContent() {
                 </button>
 
                 {isLastStep ? (
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-lg border border-gray-200 p-1 bg-white">
-                      <button
-                        type="button"
-                        onClick={() => setData((d) => ({ ...d, generationMode: 'fast' }))}
-                        className={`px-3 py-1.5 text-xs rounded-md transition ${
-                          data.generationMode === 'fast'
-                            ? 'bg-orange-500 text-white'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        极速
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setData((d) => ({ ...d, generationMode: 'standard' }))}
-                        className={`px-3 py-1.5 text-xs rounded-md transition ${
-                          data.generationMode === 'standard'
-                            ? 'bg-gray-900 text-white'
-                            : 'text-gray-600 hover:bg-gray-100'
-                        }`}
-                      >
-                        标准双方案
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => handleGenerate()}
-                      disabled={loading || !canProceed()}
-                      className="px-8 py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                      {loading ? (
-                        <>
-                          <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                          </svg>
-                          {data.generationMode === 'fast' ? '极速生成中...' : 'AI 生成中...'}
-                        </>
-                      ) : (
-                        data.generationMode === 'fast' ? '⚡ 极速生成' : '🚀 生成方案'
-                      )}
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => handleGenerate()}
+                    disabled={loading || !canProceed()}
+                    className="px-8 py-3 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                        </svg>
+                        AI 生成中...
+                      </>
+                    ) : (
+                      '生成方案'
+                    )}
+                  </button>
                 ) : (
                   <button
                     onClick={() => setStep(s => s + 1)}

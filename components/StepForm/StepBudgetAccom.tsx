@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import {
   BUDGET_LEVEL_OPTIONS,
   ACCOM_OPTIONS,
@@ -23,22 +22,19 @@ export default function StepBudgetAccom({
 }) {
   const prefs = data.preferences ?? {};
   const styles: string[] = prefs.accommodationStyles ?? [];
-  const [accomManual, setAccomManual] = useState(false);
-
   function patch(updates: Record<string, unknown>) {
     onChange({ ...data, preferences: { ...prefs, ...updates } });
   }
 
   function selectBudget(value: string) {
     const updates: Record<string, unknown> = { budgetLevel: value };
-    if (!accomManual && BUDGET_ACCOM_MAP[value]) {
+    if (BUDGET_ACCOM_MAP[value]) {
       updates.accommodation = BUDGET_ACCOM_MAP[value];
     }
     patch(updates);
   }
 
   function selectAccom(value: string) {
-    setAccomManual(true);
     patch({ accommodation: value });
   }
 
@@ -92,29 +88,15 @@ export default function StepBudgetAccom({
         </div>
       </div>
 
-      {/* Accommodation tier */}
+      {/* Accommodation */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">住宿档次</h2>
-            <p className="text-sm text-gray-600">已根据预算自动推荐，也可手动调整</p>
-          </div>
-          {accomManual && (
-            <button
-              type="button"
-              onClick={() => {
-                setAccomManual(false);
-                if (BUDGET_ACCOM_MAP[prefs.budgetLevel]) {
-                  patch({ accommodation: BUDGET_ACCOM_MAP[prefs.budgetLevel] });
-                }
-              }}
-              className="text-xs text-orange-600 hover:text-orange-800"
-            >
-              恢复自动匹配
-            </button>
-          )}
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-lg font-semibold text-gray-900">住宿偏好</h2>
         </div>
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+        <p className="mb-3 text-sm text-gray-600">已根据预算自动推荐，也可手动调整</p>
+
+        <p className="text-xs font-medium text-gray-500 mb-2">住什么类型</p>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 mb-5">
           {ACCOM_OPTIONS.map((opt) => {
             const isSel = prefs.accommodation === opt.value;
             return (
@@ -132,13 +114,9 @@ export default function StepBudgetAccom({
             );
           })}
         </div>
-      </div>
 
-      {/* Accommodation style */}
-      <div>
-        <h2 className="text-lg font-semibold text-gray-900">住宿风格偏好</h2>
-        <p className="mt-1 mb-3 text-sm text-gray-600">可多选（选填）</p>
-        <div className="grid grid-cols-2 gap-2.5">
+        <p className="text-xs font-medium text-gray-500 mb-2">额外要求（选填，可多选）</p>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
           {ACCOM_STYLE_OPTIONS.map((opt) => {
             const isSel = styles.includes(opt.value);
             return (
@@ -158,6 +136,38 @@ export default function StepBudgetAccom({
               </button>
             );
           })}
+        </div>
+      </div>
+
+      {/* Extra info */}
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900">补充信息</h2>
+        <p className="mt-1 mb-3 text-sm text-gray-600">选填，越具体 AI 越懂你；没有可以直接生成</p>
+        <div className="space-y-3">
+          <input
+            type="text"
+            value={prefs.mustVisit ?? ''}
+            onChange={(e) => patch({ mustVisit: e.target.value })}
+            maxLength={200}
+            placeholder="必去地点，如：武侯祠、宽窄巷子"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+          />
+          <input
+            type="text"
+            value={prefs.mustAvoid ?? ''}
+            onChange={(e) => patch({ mustAvoid: e.target.value })}
+            maxLength={200}
+            placeholder="希望避开，如：不想去太商业化的地方"
+            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+          />
+          <textarea
+            rows={3}
+            value={prefs.specialNeeds ?? ''}
+            onChange={(e) => patch({ specialNeeds: e.target.value })}
+            maxLength={500}
+            placeholder="特殊需求，如：素食、清真、海鲜过敏、轮椅无障碍、带宠物等"
+            className="w-full resize-y rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500"
+          />
         </div>
       </div>
     </div>

@@ -87,7 +87,7 @@ type GeoHit = {
   admin1?: string;
 };
 
-async function geocodeCityViaAmap(name: string): Promise<GeoHit | null> {
+async function geocodeCityViaAmapOnce(name: string): Promise<GeoHit | null> {
   const key = process.env.AMAP_KEY || process.env.NEXT_PUBLIC_AMAP_KEY;
   if (!key) return null;
   try {
@@ -117,6 +117,13 @@ async function geocodeCityViaAmap(name: string): Promise<GeoHit | null> {
   } catch {
     return null;
   }
+}
+
+async function geocodeCityViaAmap(name: string): Promise<GeoHit | null> {
+  const hit = await geocodeCityViaAmapOnce(name);
+  if (hit) return hit;
+  await new Promise((r) => setTimeout(r, 300));
+  return geocodeCityViaAmapOnce(name);
 }
 
 async function geocodeCity(name: string): Promise<GeoHit | null> {
@@ -242,6 +249,79 @@ function resolveWeatherQueries(formData: TripFormData): { names: string[]; note?
 }
 
 /**
+ * Post-generation: extract destination cities from AI result and fetch weather for them.
+ * Used when destinationMode is not 'specific' (AI chose the destinations).
+ */
+export async function backfillWeatherFromResult(
+  result: Record<string, unknown>,
+  formData: TripFormData
+): Promise<void> {
+  try {
+    if (formData.destinationMode === 'specific') return;
+
+    const recs = result.recommendations as Record<string, unknown> | undefined;
+    if (!recs) return;
+
+    const routeStr = (recs.route as string) || '';
+    const cityNames: string[] = [];
+
+    if (routeStr) {
+      const parts = routeStr.split(/[→➜➔>—\-→]+/).map(s => s.trim().replace(/[（(].*$/, '').trim()).filter(Boolean);
+      const departure = (formData.departure || '').trim();
+      for (const p of parts) {
+        if (p && p !== departure && !cityNames.includes(p)) cityNames.push(p);
+      }
+    }
+
+    if (!cityNames.length) {
+      const plans = result.plans as any[] | undefined;
+      if (plans?.[0]?.itinerary) {
+        const seen = new Set<string>();
+        for (const day of plans[0].itinerary) {
+          for (const act of (day.activities || [])) {
+            const loc = (act.location || '').split(/[·、,，]/)[0].trim();
+            if (loc && loc.length <= 10 && !seen.has(loc)) {
+              seen.add(loc);
+              cityNames.push(loc);
+            }
+          }
+          if (cityNames.length >= 4) break;
+        }
+      }
+    }
+
+    if (!cityNames.length) return;
+
+    const range = resolveDateRange(formData);
+    if (!range) return;
+
+    const locations: WeatherLocationPayload[] = [];
+    for (const name of cityNames.slice(0, 4)) {
+      if (locations.length > 0) await new Promise(r => setTimeout(r, 200));
+      const geo = await geocodeCity(name);
+      if (!geo) continue;
+      const admin1Clean = geo.admin1?.replace(/[省市区]$/, '') || '';
+      const nameClean = geo.name?.replace(/[省市区]$/, '') || '';
+      const showAdmin = admin1Clean && admin1Clean !== nameClean && !nameClean.includes(admin1Clean);
+      const displayName = showAdmin ? `${geo.admin1} · ${geo.name}` : geo.name;
+      const days = await fetchDailyForecast(geo.latitude, geo.longitude, range.start, range.end);
+      if (!days.length) continue;
+      locations.push({ query: name, displayName, latitude: geo.latitude, longitude: geo.longitude, days });
+    }
+
+    if (locations.length > 0) {
+      recs.weather = {
+        source: 'open-meteo',
+        timezone: 'Asia/Shanghai',
+        locations,
+      } satisfies TripWeatherPayload;
+    }
+  } catch (e) {
+    console.error('[weather] backfillWeatherFromResult:', e);
+  }
+}
+
+/**
  * 使用 Open-Meteo（无需 API Key）拉取目的地日预报，供提示词与前端展示。
  */
 export async function fetchTripWeatherForPlan(formData: TripFormData): Promise<{
@@ -265,25 +345,25 @@ export async function fetchTripWeatherForPlan(formData: TripFormData): Promise<{
     return { promptText: '', payload: { ...emptyPayload, note } };
   }
 
-  const locResults = await Promise.all(
-    names.map(async (rawName) => {
-      const geo = await geocodeCity(rawName);
-      if (!geo) return null;
-      const admin1Clean = geo.admin1?.replace(/[省市区]$/, '') || '';
-      const nameClean = geo.name?.replace(/[省市区]$/, '') || '';
-      const showAdmin = admin1Clean && admin1Clean !== nameClean && !nameClean.includes(admin1Clean);
-      const displayName = showAdmin ? `${geo.admin1} · ${geo.name}` : geo.name;
-      const days = await fetchDailyForecast(geo.latitude, geo.longitude, range.start, range.end);
-      if (!days.length) return null;
-      return {
-        query: rawName,
-        displayName,
-        latitude: geo.latitude,
-        longitude: geo.longitude,
-        days,
-      } satisfies WeatherLocationPayload;
-    })
-  );
+  const locResults: (WeatherLocationPayload | null)[] = [];
+  for (const rawName of names) {
+    if (locResults.length > 0) await new Promise((r) => setTimeout(r, 200));
+    const geo = await geocodeCity(rawName);
+    if (!geo) { locResults.push(null); continue; }
+    const admin1Clean = geo.admin1?.replace(/[省市区]$/, '') || '';
+    const nameClean = geo.name?.replace(/[省市区]$/, '') || '';
+    const showAdmin = admin1Clean && admin1Clean !== nameClean && !nameClean.includes(admin1Clean);
+    const displayName = showAdmin ? `${geo.admin1} · ${geo.name}` : geo.name;
+    const days = await fetchDailyForecast(geo.latitude, geo.longitude, range.start, range.end);
+    if (!days.length) { locResults.push(null); continue; }
+    locResults.push({
+      query: rawName,
+      displayName,
+      latitude: geo.latitude,
+      longitude: geo.longitude,
+      days,
+    } satisfies WeatherLocationPayload);
+  }
   const locations = locResults.filter((x): x is WeatherLocationPayload => x != null);
 
   const payload: TripWeatherPayload = {

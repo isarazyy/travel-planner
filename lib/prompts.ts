@@ -2,13 +2,10 @@ import {
   TripFormData,
   COMPANION_OPTIONS,
   PACE_OPTIONS,
-  INTEREST_OPTIONS,
   ACCOM_OPTIONS,
   ACCOM_STYLE_OPTIONS,
-  FOOD_PREF_OPTIONS,
   BUDGET_LEVEL_OPTIONS,
   TRANSPORT_OPTIONS,
-  WAKE_OPTIONS,
 } from './types';
 
 function findLabel(options: { value: string; label: string }[], value: string): string {
@@ -98,16 +95,15 @@ export function buildMultiPlanPrompt(
   const childInfo = p.companion === 'family' && p.childAge ? `（孩子年龄段：${p.childAge}）` : '';
   const pace = PACE_OPTIONS.find(o => o.value === p.pace);
   const paceDesc = pace ? `${pace.label} - ${pace.desc}` : p.pace;
-  const interests = findLabels(INTEREST_OPTIONS, p.interests);
-  const interestLine = interests ? `- 兴趣偏好：${interests}` : '- 兴趣偏好：无特定偏好，请综合推荐当地最值得体验的内容';
+  const interestLine = '- 兴趣偏好：无特定偏好，请综合推荐当地最值得体验的内容';
   const accom = findLabel(ACCOM_OPTIONS, p.accommodation);
   const accomStyles = p.accommodationStyles?.filter(s => s && s !== 'no_preference') ?? [];
   const accomStyleDesc = accomStyles.length > 0
     ? accomStyles.map(s => ACCOM_STYLE_OPTIONS.find(o => o.value === s)).filter(Boolean).map(o => `${o!.label}（${o!.desc}）`).join('、')
     : '';
-  const foodPrefs = findLabels(FOOD_PREF_OPTIONS, p.foodPrefs);
-  const foodLine = foodPrefs ? `- 餐饮偏好：${foodPrefs}` : '- 餐饮偏好：不限';
-  const dietaryNote = p.dietaryNotes ? `\n- 饮食忌口/特殊需求：${p.dietaryNotes}` : '';
+  const foodLine = '- 餐饮偏好：不限，综合推荐当地特色美食';
+  const dietaryNote = p.specialNeeds && /(素食|清真|过敏|忌口|不吃|halal|vegan|vegetarian)/i.test(p.specialNeeds)
+    ? `\n- 饮食相关注意：见下方特殊需求` : '';
   const budget = BUDGET_LEVEL_OPTIONS.find(o => o.value === p.budgetLevel);
   const budgetDesc = budget ? `${budget.label}（${budget.desc}）` : p.budgetLevel;
   const transports = findLabels(TRANSPORT_OPTIONS, p.transportModes);
@@ -117,7 +113,6 @@ export function buildMultiPlanPrompt(
   const motoBikeType = p.motoBikeType?.trim();
   const motoDailyKm = p.motoDailyKm || 220;
   const motoAllowNightRide = p.motoAllowNightRide === 'yes' ? '可接受短时夜骑' : '不接受夜骑';
-  const wakeUp = findLabel(WAKE_OPTIONS, p.wakeUpTime);
   const mustVisit = p.mustVisit ? `\n- 必去的地方：${p.mustVisit}` : '';
   const mustAvoid = p.mustAvoid ? `\n- 不想去的地方/不想参加的活动：${p.mustAvoid}` : '';
   const specialNeeds = p.specialNeeds ? `\n- 特殊需求：${p.specialNeeds}` : '';
@@ -136,9 +131,7 @@ export function buildMultiPlanPrompt(
   const paceKey = p.pace || 'balanced';
   const density = resolvePaceDailyDensity(paceKey, fixedDayCount != null && fixedDayCount > 10);
 
-  const planCountText = isFast
-    ? '请生成 1 个高质量、可直接执行的方案。'
-    : '请生成 2 个**体验维度不同**的方案（例如：A 侧重「历史街区 + 城市烟火 + 夜间经济」，B 侧重「自然风光 + 文艺街区 + 慢咖啡」）。两方案须在**主题组合、动线强度、用餐与夜游风格**上拉开差距；禁止仅总价/酒店档次不同而每日景点高度雷同。';
+  const planCountText = '请生成 1 个高质量、可直接执行的方案。用户可通过 AI 对话进一步调整细节，无需提供多套方案。';
 
   const longTrip = fixedDayCount != null && fixedDayCount > 10;
 
@@ -150,13 +143,61 @@ export function buildMultiPlanPrompt(
 - 时段覆盖要求：${density.coverage}
 - **抵达/首末日**：若涉及机场/高铁到达，须额外写出「入住后傍晚」或「返程前上午」至少 1 项可执行安排，不得让整天停在「抵达机场」一条上结束。
 - **纯转场日**：可略少 1 条，但仍须写清交通段 + 到达后 1～2 项轻量活动（安顿、简餐、周边散步）。
-- attractions / foodSpots 作为「亮点清单」须与 itinerary 相互呼应，不得出现 itinerary 很空但 attractions 堆砌的脱节。`;
+- attractions / foodSpots 作为「亮点清单」须与 itinerary 相互呼应，不得出现 itinerary 很空但 attractions 堆砌的脱节。
+
+【用餐安排 — 硬性要求，每天必须有】
+- **每天的 itinerary 必须包含午餐和晚餐各一条活动**，这是旅行中不可缺少的环节。
+- 午餐时间：11:30-13:30 之间安排，**绝对不能把午餐排到 15:00 以后**。
+- 晚餐时间：17:30-19:30 之间安排。
+- 用餐活动要推荐当地特色餐厅/小吃，带 foodRecommendation（店名、评分、招牌菜、推荐理由）。
+- 如果当天有长途驾车/乘车，在途中合适的城镇安排用餐，不能跳过。
+- 即使是轻松休闲日，也必须写出午餐和晚餐的安排，哪怕只是"酒店附近觅食"也要有一条。`;
 
   const outputLimitText = `篇幅与上限（在满足上文「每日条数下限」前提下）：单条 activity 的 notes 尽量不超过 40 字；attractions 总数建议不超过 ${isFast ? 14 : 22} 条；accommodations ${isFast ? '3～5' : '4～7'} 条；foodSpots ${isFast ? '4～8' : '6～12'} 条。`;
 
   const hasSelfDrive = p.transportModes?.includes('self_drive');
   const selfDriveGuide = hasSelfDrive
-    ? `\n自驾游模式额外要求（非常重要）：\n- 重点放在"自驾路线规划"，每日行程必须包含驾车路段说明\n- transportDetail 必须写清楚：全程预估总里程和总驾车时长；每日驾车路段（A→B，约X公里，约X小时）；推荐走的高速/国道名称（如G2京沪高速、G4京港澳高速、318国道等）；高速费预估\n- itinerary 里每天 activities 须含一条"当日驾车转场"条目（如"自驾前往XX"）：duration 写驾车耗时，notes 写路线建议和途经服务区\n- 每日驾车时长控制：单日不超过4-5小时（长途不超过6小时）；两地超500km须安排中间住宿；连续驾车超2小时在notes里建议休息\n- 每段超2小时高速路段，notes里推荐1-2个途中服务区或沿途可短停的观景点\n- tips 须含：自驾安全提醒、加油建议（偏远地区提前加满油）、停车注意、高速路况提醒\n- costBreakdown 的 transport 费用要包含油费和过路费预估`
+    ? `\n自驾游模式额外要求（非常重要 — 自驾的核心体验是"在路上"）：
+
+【路线规划】
+- transportDetail 必须写清楚：全程预估总里程和总驾车时长；每日驾车路段（A→B，约X公里，约X小时）；推荐走的高速/国道名称（如G2京沪高速、318国道等）；高速费预估
+- itinerary 里每天如果有驾车路段，activities 须含一条"当日驾车转场"条目（如"自驾前往XX"），duration 写驾车耗时
+- **自驾转场活动必须带 transportInfo**，且 **distance 字段不可省略**：
+  · fromStation: 出发城市
+  · toStation: 目的城市
+  · distance: "约X公里"（必填！用户需要知道开多远）
+  · duration: "约X小时"
+  · priceNote: "油费及过路费预估X元"
+  · 错误示例（缺少distance）：{"fromStation":"北京","toStation":"青岛","duration":"约5小时","priceNote":"油费600元"} ← 不合格
+  · 正确示例：{"fromStation":"北京","toStation":"青岛","distance":"约630公里","duration":"约5小时","priceNote":"油费及过路费预估600元"} ← 合格
+
+【沿途体验 — 自驾游最重要的部分】
+- 自驾的精髓在于沿途风光，而不仅仅是赶到目的地。每段超过2小时的驾车路段，**必须**在 notes 里写明：
+  · 沿途有哪些值得短停观赏的风景（如：某段高速穿越山谷视野开阔、某处有观景台可以停车拍照、经过某湖/某桥/某隧道群很壮观等）
+  · 推荐1-2个可以下高速短暂游玩的地方（如途经某古镇可下高速逛30分钟、某服务区有特色小吃等）
+  · 路况特点提醒（山路弯道多注意减速、某段限速较低等）
+
+【自驾日用餐 — 最高优先级硬约束，违反即方案不合格】
+- **自驾日的 activities 必须按这个顺序安排：出发驾车 → 途中午餐(12:00左右) → 继续驾车/抵达 → 下午活动 → 晚餐(18:00左右)**
+- **午餐时间必须在 11:30-13:30 之间**，绝对不能排到14:00以后。标记为"午餐"却排在15:00以后 = 方案不合格。
+- **午餐地点必须在驾车沿途城镇**，不能到目的地才吃。正确做法：把长途驾车拆成两段，中间插入午餐。
+- 示例：北京9:00出发自驾去青岛（约5小时630公里），正确安排：
+  · 09:00 自驾出发（北京→淄博方向，约3小时）
+  · 12:00 **午餐：淄博**（推荐淄博烧烤/博山菜，带 foodRecommendation）
+  · 13:00 继续自驾（淄博→青岛，约2小时）
+  · 15:00 抵达青岛，入住酒店
+  · 18:00 晚餐
+- 午餐活动必须带 foodRecommendation（店名、评分、招牌菜、推荐理由）
+- 每驾车2小时建议在 notes 里提醒休息，长途日（>4h）**必须安排至少1次服务区/观景台停车休息**，写进 activities
+
+【驾车时长控制】
+- 单日驾车不超过4-5小时（长途不超过6小时）
+- 两地超500km须安排中间住宿
+- 自驾游不是赶路，要给沿途停靠、拍照、休息留足时间
+
+【费用与安全】
+- costBreakdown 的 transport 费用包含油费和过路费预估
+- tips 须含：自驾安全提醒、加油建议（偏远地区提前加满油）、停车注意、疲劳驾驶警告`
     : '';
 
   // isMountainRun always exits via the early return above, so this is only for motorcycle touring
@@ -565,9 +606,14 @@ ${mrAccomNote}
 
 【联网搜索能力 — 充分利用（极其重要）】
 - 你已开启联网搜索，请**主动搜索**以下来源获取真实数据：
-  1. **大众点评 / 美团**：搜索目的地城市高评分餐厅，获取真实店名、评分、招牌菜、人均价格，填入 foodRecommendation 和 foodSpots。
-  2. **小红书 / 马蜂窝 / 携程攻略**：搜索目的地热门景点、打卡地、真实游客体验，让推荐更贴合实际。
-  3. **酒店预订平台**：搜索真实酒店名称、价格区间、用户评价，填入 accommodations 和 stayInfo。
+  1. **小红书 / 马蜂窝 / 携程攻略**：搜索目的地热门景点、打卡地、真实游客体验，让推荐更贴合实际。
+  2. **酒店预订平台**：搜索真实酒店名称、价格区间、用户评价，填入 accommodations 和 stayInfo。
+
+【餐饮推荐 — 简化原则】
+- 餐饮只推荐到「菜系 + 区域」层面（如"春熙路附近川菜""回民街小吃"），**不要编造具体店名**。
+- 只有当你从高德POI数据或联网搜索中获得了**确认存在的真实店名**时，才可以写具体店名。
+- foodRecommendation 可以简写：shopName 填"当地XX菜推荐"或真实店名，rating 可省略，specialty 写菜系特色即可。
+- foodSpots 同理：每项 name 填"XX区域·XX菜系"或真实可查店名，不要凭空编造。
 
 【铁路信息 — 站名准确，车次留空】
 - 你**无法**可靠查询 12306 车次数据，**严禁编造**车次号（如 G1234）、精确发车/到达时刻、精确票价。
@@ -597,8 +643,7 @@ ${fixedDateBlock}${durationConstraint}
 ${interestLine}
 - 住宿档次：${accom}${accomStyleDesc ? `\n- 住宿风格偏好：${accomStyleDesc}（请据此优先推荐符合风格的住宿，而非普通连锁快捷酒店）` : ''}
 ${foodLine}${dietaryNote}
-- 预算水平：${budgetDesc}（人均每天）
-- 每天出发时间：${wakeUp}${mustVisit}${mustAvoid}${specialNeeds}
+- 预算水平：${budgetDesc}（人均每天）${mustVisit}${mustAvoid}${specialNeeds}
 ${mustAvoidHardRules}
 ${realDataBlock}${hotelWebBlock}${weatherBlock}${transportFoodBlock}
 ${planCountText}
@@ -630,6 +675,7 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
           "theme": "当天主题",
           "activities": [
             {"time": "上午出发", "activity": "乘高铁前往南昌", "location": "北京西站→南昌西站", "duration": "约4～5小时", "cost": 0, "notes": "建议提前在12306查询车次并购票", "transportInfo": {"fromStation": "北京西站", "toStation": "南昌西站", "duration": "约4～5小时", "priceNote": "请在12306查询具体车次与票价"}},
+            {"time": "09:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约5小时", "cost": 0, "notes": "途经G2京沪高速转G22青兰高速，沿途可在淄博服务区休息", "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约5小时", "priceNote": "油费及过路费预估600元"}},
             {"time": "16:00", "activity": "入住酒店并休整", "location": "八一广场", "duration": "约1小时", "cost": 0, "stayInfo": {"hotelName": "全季南昌八一广场店", "pricePerNight": 360}},
             {"time": "19:00", "activity": "晚餐探店", "location": "万寿宫历史文化街区", "duration": "约1.5小时", "cost": 120, "foodRecommendation": {"shopName": "邓氏瓦罐汤（万寿宫店）", "rating": 4.7, "specialty": "招牌瓦罐汤/南昌拌粉", "reason": "大众点评高分老店，本地人常去，汤底浓郁"}}
           ]
@@ -666,12 +712,12 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
         }
       ],
       "costBreakdown": {
-        "transport": 0,
-        "accommodation": 0,
-        "food": 0,
-        "attractions": 0,
-        "other": 0,
-        "total": 0
+        "transport": "800-1200",
+        "accommodation": "600-1000",
+        "food": "400-600",
+        "attractions": "100-300",
+        "other": "0-200",
+        "total": "2000-3000"
       },
       "tips": ["实用贴士1", "实用贴士2"]
     }
@@ -680,12 +726,12 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
 
 注意：
 ${notePlanDaysLine}
-2. 所有费用是${data.peopleCount}人的总费用（人民币元）
+2. 所有费用是${data.peopleCount}人的总费用（人民币元），**用范围表示**（如"800-1200"），不要给精确到个位的数字。自驾/骑行的 transport 须包含油费和过路费预估范围。
 3. 费用要合理，符合${budgetDesc}的预算水平
-4. 方案之间要有明显区别（${fixedDayCount != null ? '节奏、交通方式、费用档次、玩法侧重等；天数必须相同' : '天数、节奏、交通方式、费用档次等'}）
-5. 若给了具体目的地：每个方案必须**全部涵盖**这些地点，但**游览与交通顺序完全由你优化**，不得机械按用户输入顺序串联；若没给具体目的地，你需要先推荐目的地再排路线
+4. 只生成 1 个方案，plans 数组恰好 1 个元素。用户的出行方式为「${transports}」，方案中的交通方式**必须与此一致**，不得擅自换成其他交通方式
+5. 若给了具体目的地：方案必须**全部涵盖**这些地点，但**游览与交通顺序完全由你优化**，不得机械按用户输入顺序串联；若没给具体目的地，你需要先推荐目的地再排路线
 ${noteRecommendedDaysLine}
-7. 每天的第一个活动时间根据"${wakeUp}"来安排
+7. 每天的第一个活动时间根据旅行节奏合理安排（轻松节奏可晚些出发，紧凑节奏早些出发）
 8. ${fixedDayCount != null ? 'itinerary 每项的 date 为真实公历日期；theme 仍写当天主题' : 'date 字段用 "Day 1", "Day 2" 这样的格式'}
 9. 顶层必须包含 nearbySuggestions 字符串字段。${fixedDayCount != null ? '固定日期下须按上文详写顺路/半日周边玩法。' : '日期未固定时可填空字符串，或简要写出若采用某路线时的顺路可玩点。'}
 10. ${hotelAccommodationRules}
@@ -752,7 +798,11 @@ export function buildPlanEditPrompt(args: {
 - 用户要求增加/减少/替换/调整内容（如"多推荐几个酒店""换成夜景""加个景点""去掉博物馆""住宿多给几个选择"）
 - 用户指定了具体的修改方向（如"第一天住宿多推荐几个""预算降到5000""第2天轻松一点"）
 - 用户确认了你之前的建议（如"好的就按你说的改""行就这样吧""可以"）
-- 用户表达了否定/拒绝某部分行程（如"北京的不去""我不想去那里""第三天不要了""XX我不去"）→ 这也是指令，立刻执行删除/替换！
+- 用户表达了否定/拒绝某部分行程（如"第三天不要了""把这个景点去掉"）→ 这是指令，立刻执行删除/替换！
+- **特殊情况——删除整个城市**：当用户说"XX不去了""不想去XX了"要删除的是**整个城市/目的地**时，先确认再改（因为有两种处理方式）：
+  - 回复类似："好的，不去XX了。你想怎么处理：\n1. 直接少玩一天（总天数从N天变N-1天）\n2. 天数不变，把XX的时间分给其他城市\n你选哪个？"
+  - 此时 planModified 设为 false，等用户回复后再执行修改
+  - 如果用户明确说了处理方式（如"不去日照了 少一天"或"日照去掉 时间分给青岛"），就不需要再问，直接执行
 - 用户用了这些**动作词**中的任何一个 → 当作指令，直接执行修改：
   "多推荐""换成""改成""加上""去掉""删掉""不要""不去""不想去""不想住""取消""拿掉""砍掉""缩短""延长""提前""推迟""便宜点""贵一点""升级""降级"
 - **注意："多推荐几个"="帮我推荐更多"，是明确指令，必须立刻修改方案，不要反问！**
@@ -779,7 +829,11 @@ export function buildPlanEditPrompt(args: {
 
 修改方案时的要求：
 1. **增量输出**：itinerary 数组中，**未修改的天只写 { "day": N, "_keep": true }**，只有真正改动过的天才写完整内容。这非常重要，可以大幅减少输出量！例如14天方案只改了第1、7、14天，itinerary 应该是：[{ "day": 1, ...完整内容 }, { "day": 2, "_keep": true }, ..., { "day": 7, ...完整内容 }, ..., { "day": 14, ...完整内容 }]
-   - **例外**：如果用户要求**重新排列城市顺序/调整每城天数分配**，则**所有天都必须输出完整内容**（不能用 _keep），因为每天对应的城市都变了
+   - **例外1**：如果用户要求**重新排列城市顺序/调整每城天数分配**，则**所有天都必须输出完整内容**（不能用 _keep），因为每天对应的城市都变了
+   - **例外2（删除目的地）**：当用户确认了删除某个城市后的处理方式（减天 or 保持天数重新分配），执行修改时：
+     - 减天：总天数相应减少，剩余城市天数可微调，**所有天都必须输出完整内容，禁止 _keep**
+     - 保持天数：把被删城市的天数重新分配给其他城市（增加游览深度或加入周边），**所有天都必须输出完整内容，禁止 _keep**
+     - 两种情况下 transportDetail 都必须同步更新为新路线
 2. 只改和用户指令相关的内容，未提及部分保持不变
 3. 修改后给出简要变更说明（changeSummary）
 4. assistantMessage 用自然口语回复，像朋友一样说话，不要机械化（如"好嘞，帮你换了几家有格调的民宿，你看看喜不喜欢～"）
@@ -796,7 +850,7 @@ export function buildPlanEditPrompt(args: {
 11. 若当前活动已有 transportInfo/stayInfo/foodRecommendation 等结构化字段，除非用户明确要求删除，否则应保留并按新需求更新
 12. 修改后须清除与用户否决项冲突的内容（例如用户拒绝博物馆却仍出现「某某博物馆」时应删除并替换为合规活动）
 13. 铁路段：transportInfo 只填真实站名、大致耗时、"请在12306查询"；**不要填 trainNo/departTime/arriveTime**。
-14. **costBreakdown 必须与修改后的内容一致**：任何涉及预算调整、住宿升级/降级、增减活动等改动，都必须同步重新计算 costBreakdown 中各项金额和 total。绝对不能照搬旧方案的费用数字。即使用户没提"费用"二字，只要行程内容变了（比如换了更贵的酒店、加了景点门票），费用也要跟着变。
+14. **costBreakdown 用范围表示**（如 "transport": "800-1200", "total": "2000-3000"），不要精确到个位。任何涉及预算调整、住宿升级/降级、增减活动等改动，都必须同步更新 costBreakdown 中各项范围和 total。
 ${mustAvoidEditBlock}
 行程背景：
 - 出发地：${trip.departure}
@@ -840,12 +894,12 @@ ${userInstruction}
     "accommodations": [],
     "foodSpots": [],
     "costBreakdown": {
-      "transport": 0,
-      "accommodation": 0,
-      "food": 0,
-      "attractions": 0,
-      "other": 0,
-      "total": 0
+      "transport": "800-1200",
+      "accommodation": "600-1000",
+      "food": "400-600",
+      "attractions": "100-300",
+      "other": "0-200",
+      "total": "2000-3000"
     },
     "tips": []
   }

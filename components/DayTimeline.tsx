@@ -4,30 +4,43 @@ import { DayPlan } from '@/lib/types';
 import { sanitizePlanString } from '@/lib/normalize-plan';
 import type { TripWeatherPayload } from '@/lib/weather';
 import { getDressAndUmbrellaAdvice } from '@/lib/weather-advice';
-import { buildAmapNavUrl } from '@/lib/amap-uri';
+import { buildAmapNavUrl, buildDianpingUrl, buildMeituanUrl, buildMeituanHotelUrl, buildCtripHotelUrl } from '@/lib/amap-uri';
 
 export default function DayTimeline({
   day,
   tripWeather,
+  transportModes,
 }: {
   day: DayPlan;
   tripWeather?: TripWeatherPayload | null;
+  transportModes?: string[];
 }) {
-  type WeatherRow = { label: string; weather: { date: string; condition: string; tempMin: number; tempMax: number; precipProb: number } };
+  type WeatherDay = { date: string; condition: string; tempMin: number; tempMax: number; precipProb: number };
+  type WeatherRow = { label: string; weather: WeatherDay };
   const dateIso = day.dateIso;
   const dayIndex = Math.max(0, (day.day || 1) - 1);
-  const weatherRows = tripWeather?.locations?.length
-    ? tripWeather.locations
-        .map((loc) => {
-          const byIso = dateIso ? loc.days.find((d) => d.date === dateIso) : undefined;
-          const byIndex = loc.days[dayIndex];
-          const w = byIso || byIndex;
-          if (!w) return null;
-          const label = (loc.displayName || loc.query).split('·').pop()?.trim() || loc.query;
-          return { label, weather: w };
-        })
-        .filter((x): x is WeatherRow => !!x)
-    : [];
+
+  const weatherRows: WeatherRow[] = [];
+  if (tripWeather?.locations?.length) {
+    const dayText = `${day.theme || ''} ${(day.activities || []).map((a) => `${a.activity || ''} ${a.location || ''}`).join(' ')}`;
+    const cityEntries = tripWeather.locations.map((loc) => {
+      const short = (loc.displayName || loc.query).split('·').pop()?.trim() || loc.query;
+      const query = loc.query.replace(/[省市区]$/, '');
+      return { loc, short, query };
+    });
+
+    const matched = cityEntries.find((c) => dayText.includes(c.query))
+      || cityEntries.find((c) => dayText.includes(c.short))
+      || cityEntries[0];
+
+    if (matched) {
+      const w = dateIso
+        ? matched.loc.days.find((d) => d.date === dateIso)
+        : matched.loc.days[dayIndex];
+      if (w) weatherRows.push({ label: matched.short, weather: w });
+    }
+  }
+
   const weatherBits = weatherRows.map(
     (r) => `${r.label} ${r.weather.condition} ${r.weather.tempMin}~${r.weather.tempMax}℃ 降水${r.weather.precipProb}%`,
   );
@@ -36,6 +49,17 @@ export default function DayTimeline({
 
   const activities = Array.isArray(day.activities) ? day.activities : [];
   const lastIdx = Math.max(0, activities.length - 1);
+
+  const dayCityHint = (() => {
+    const t = day.theme || '';
+    const m = t.match(/([\u4e00-\u9fa5]{2,4})(?:一日游|半日游|深度游|游玩|探索|漫步|之旅|市区|海滨|古城|老城|美食|风光)/);
+    if (m) return m[1];
+    const arr = t.match(/→([\u4e00-\u9fa5]{2,4})$/);
+    if (arr) return arr[1];
+    const dest = t.match(/(?:抵达|到达|前往|游览)([\u4e00-\u9fa5]{2,4})/);
+    if (dest) return dest[1];
+    return undefined;
+  })();
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 px-5 pt-5 pb-8 mb-4 overflow-visible">
@@ -73,12 +97,17 @@ export default function DayTimeline({
             act.transportInfo?.departTime && act.transportInfo?.arriveTime
               ? `${act.transportInfo.departTime} - ${act.transportInfo.arriveTime}`
               : undefined,
+            act.transportInfo?.distance,
             act.transportInfo?.duration,
             act.transportInfo?.priceNote,
           ].filter(Boolean) as string[];
           const hasTransportInfo = transportBits.length > 0;
           const actText = `${act.activity || ''} ${act.notes || ''} ${act.location || ''}`;
           const isFlight = /飞机|航班|飞往|机场|航空|飞行/.test(actText);
+          const isDriveText = /自驾|驾车|开车|高速|油费|过路费|服务区|停车/.test(actText);
+          const isDriveMode = transportModes?.includes('self_drive') || transportModes?.includes('motorcycle');
+          const isDrive = isDriveText || (isDriveMode && !isFlight);
+          const transportIcon = isFlight ? '✈️' : isDrive ? '🚗' : '🚄';
           const hasStayInfo = !!(act.stayInfo?.hotelName || (act.stayInfo?.pricePerNight || 0) > 0);
           const hasFoodInfo = !!(
             act.foodRecommendation?.shopName ||
@@ -103,7 +132,7 @@ export default function DayTimeline({
                   <span>📍 {sanitizePlanString(act.location, '地点待补充')}</span>
                   {act.location && act.location !== '地点待补充' && (
                     <a
-                      href={buildAmapNavUrl(act.location)}
+                      href={buildAmapNavUrl(act.location, dayCityHint)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-0.5 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition whitespace-nowrap"
@@ -122,7 +151,7 @@ export default function DayTimeline({
                 {hasTransportInfo ? (
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
                     <p className="text-xs text-blue-800 leading-relaxed">
-                      {isFlight ? '✈️' : '🚄'} 交通信息：{transportBits.join(' · ')}
+                      {transportIcon} 交通信息：{transportBits.join(' · ')}
                     </p>
                     {isFlight ? (
                       <a
@@ -133,7 +162,7 @@ export default function DayTimeline({
                       >
                         🔍 查航班比价
                       </a>
-                    ) : (
+                    ) : !isDrive ? (
                       <a
                         href="https://www.12306.cn/"
                         target="_blank"
@@ -142,34 +171,38 @@ export default function DayTimeline({
                       >
                         🔍 去12306查车次
                       </a>
-                    )}
+                    ) : null}
                   </div>
                 ) : null}
                 {hasStayInfo ? (
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <p className="text-xs text-indigo-700 leading-relaxed">
-                      🏨 住宿：{act.stayInfo?.hotelName || '酒店待补充'}
-                      {(act.stayInfo?.pricePerNight || 0) > 0 ? ` · 约¥${act.stayInfo?.pricePerNight}/晚` : ''}
-                    </p>
+                  <p className="text-xs text-indigo-700 leading-relaxed mt-1.5">
+                    🏨 住宿：{act.stayInfo?.hotelName || '酒店待补充'}
+                    {(act.stayInfo?.pricePerNight || 0) > 0 ? ` · 约¥${act.stayInfo?.pricePerNight}/晚` : ''}
                     {act.stayInfo?.hotelName && (
-                      <a
-                        href={buildAmapNavUrl(act.stayInfo.hotelName)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-0.5 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition whitespace-nowrap shrink-0"
-                      >
-                        导航
-                      </a>
+                      <span className="ml-1.5 text-gray-400">
+                        （<a href={buildDianpingUrl(act.stayInfo.hotelName, dayCityHint)} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:underline">大众点评</a>
+                        {' / '}
+                        <a href={buildMeituanHotelUrl(act.stayInfo.hotelName, dayCityHint)} target="_blank" rel="noopener noreferrer" className="text-yellow-600 hover:underline">美团</a>
+                        {' / '}
+                        <a href={buildCtripHotelUrl(act.stayInfo.hotelName, dayCityHint)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">携程</a>）
+                      </span>
                     )}
-                  </div>
+                  </p>
                 ) : null}
                 {hasFoodInfo ? (
-                  <p className="text-xs text-emerald-700 mt-1.5 leading-relaxed">
+                  <p className="text-xs text-emerald-700 leading-relaxed mt-1.5">
                     🍜 推荐餐饮：
                     {act.foodRecommendation?.shopName ? ` ${act.foodRecommendation.shopName}` : ' 待补充店名'}
                     {act.foodRecommendation?.rating && !isNaN(Number(act.foodRecommendation.rating)) ? `（${Number(act.foodRecommendation.rating).toFixed(1)}分）` : ''}
                     {act.foodRecommendation?.specialty ? ` · 招牌：${act.foodRecommendation.specialty}` : ''}
                     {act.foodRecommendation?.reason ? ` · ${act.foodRecommendation.reason}` : ''}
+                    {act.foodRecommendation?.shopName && (
+                      <span className="ml-1.5 text-gray-400">
+                        （<a href={buildDianpingUrl(act.foodRecommendation.shopName, dayCityHint)} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:underline">大众点评</a>
+                        {' / '}
+                        <a href={buildMeituanUrl(act.foodRecommendation.shopName, dayCityHint)} target="_blank" rel="noopener noreferrer" className="text-yellow-600 hover:underline">美团</a>）
+                      </span>
+                    )}
                   </p>
                 ) : null}
               </div>

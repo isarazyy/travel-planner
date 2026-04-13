@@ -1,11 +1,15 @@
 'use client';
 
+import { buildMeituanHotelUrl, buildCtripHotelUrl, buildAmapNavUrl } from '@/lib/amap-uri';
+
 export default function AccommodationList({
   items,
   webSearchUsed,
+  city,
 }: {
   items: any[];
   webSearchUsed?: boolean;
+  city?: string;
 }) {
   if (!items?.length) return null;
 
@@ -25,6 +29,7 @@ export default function AccommodationList({
         {items.map((a: any, i: number) => {
           const pros = Array.isArray(a.pros) ? a.pros : [];
           const cons = Array.isArray(a.cons) ? a.cons : [];
+          const areaOrCity = a.area || city || '';
 
           return (
             <div key={i} className="border border-gray-100 rounded-xl p-4 bg-gray-50/40">
@@ -41,6 +46,16 @@ export default function AccommodationList({
                 {a.type}
                 {a.area ? ` · ${a.area}` : ''}
               </p>
+
+              <p className="text-xs text-gray-400 mt-2">
+                查看：
+                <a href={buildMeituanHotelUrl(a.name, areaOrCity)} target="_blank" rel="noopener noreferrer" className="text-yellow-600 hover:underline">美团</a>
+                {' / '}
+                <a href={buildCtripHotelUrl(a.name, areaOrCity)} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">携程</a>
+                {' / '}
+                <a href={buildAmapNavUrl(a.name, areaOrCity)} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:underline">导航</a>
+              </p>
+
               {a.highlights ? <p className="text-xs text-gray-600 mt-2 leading-relaxed">{a.highlights}</p> : null}
               {a.webNote ? (
                 <p className="text-xs text-gray-400 mt-2 italic leading-relaxed">说明：{a.webNote}</p>

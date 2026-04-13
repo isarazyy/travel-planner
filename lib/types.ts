@@ -42,6 +42,7 @@ export interface TripFormData {
   dateHint?: string;
   peopleCount: number;
   preferences: TripPreferences;
+  regenerate?: boolean;
 }
 
 export interface DayActivity {
@@ -59,6 +60,7 @@ export interface DayActivity {
     departTime?: string;
     arriveTime?: string;
     duration?: string;
+    distance?: string;
     priceNote?: string;
   };
   /** 可选：住宿细节（每晚） */
@@ -119,12 +121,12 @@ export interface FoodSpot {
 }
 
 export interface CostBreakdown {
-  transport: number;
-  accommodation: number;
-  food: number;
-  attractions: number;
-  other: number;
-  total: number;
+  transport: number | string;
+  accommodation: number | string;
+  food: number | string;
+  attractions: number | string;
+  other: number | string;
+  total: number | string;
 }
 
 export interface TripPlan {
@@ -210,20 +212,19 @@ export const ACCOM_OPTIONS = [
   { value: 'hostel', label: '青旅/床位', desc: '最省钱的选择' },
   { value: 'budget_hotel', label: '经济酒店', desc: '干净整洁就行' },
   { value: 'comfort_hotel', label: '舒适酒店', desc: '四星左右' },
-  { value: 'luxury', label: '高端/度假酒店', desc: '享受型' },
-  { value: 'bnb', label: '民宿/特色住宿', desc: '有当地特色' },
+  { value: 'luxury', label: '高端酒店/度假村', desc: '五星级、度假村' },
+  { value: 'boutique_bnb', label: '精品民宿', desc: '独栋、管家服务、有设计感' },
+  { value: 'unique_stay', label: '特色住宿', desc: '树屋、洞穴、帐篷、星空房' },
   { value: 'mixed', label: '混搭都行', desc: '看情况安排' },
 ];
 
 export const ACCOM_STYLE_OPTIONS = [
-  { value: 'designer', label: '设计感', desc: '装修有格调、拍照好看', icon: '🎨' },
-  { value: 'boutique_bnb', label: '高端民宿', desc: '精品独栋、管家服务', icon: '🏡' },
+  { value: 'designer', label: '设计感/网红', desc: '装修有格调、拍照好看', icon: '🎨' },
   { value: 'scenic_view', label: '景观房', desc: '山景/湖景/海景/江景', icon: '🏔️' },
+  { value: 'hot_spring', label: '温泉/泡池', desc: '放松为主', icon: '♨️' },
   { value: 'cultural', label: '文化主题', desc: '古宅改造、茶室禅意', icon: '🏯' },
-  { value: 'resort', label: '度假村/温泉', desc: '泡池、花园、放松为主', icon: '♨️' },
-  { value: 'treehouse_cave', label: '特色体验', desc: '树屋、洞穴、帐篷、星空房', icon: '⛺' },
   { value: 'pet_friendly', label: '可带宠物', desc: '允许携带毛孩子', icon: '🐾' },
-  { value: 'no_preference', label: '不挑风格', desc: '干净方便就行', icon: '✅' },
+  { value: 'no_preference', label: '不挑', desc: '干净方便就行', icon: '✅' },
 ];
 
 export const FOOD_PREF_OPTIONS = [
@@ -288,9 +289,8 @@ export function modeIcon(mode: string): string {
 }
 
 export const DESTINATION_MODE_OPTIONS = [
-  { value: 'specific' as DestinationMode, label: '我有目的地', desc: '列出想去哪，AI 排最优先后顺序与走法', icon: '📍' },
-  { value: 'theme' as DestinationMode, label: '我有偏好类型', desc: '比如海边/草原/爬山', icon: '🧭' },
-  { value: 'open' as DestinationMode, label: '我完全没想法', desc: 'AI 推荐近期热门去处', icon: '✨' },
+  { value: 'specific' as DestinationMode, label: '我有目的地', icon: '📍' },
+  { value: 'open' as DestinationMode, label: '帮我推荐', icon: '✨' },
 ];
 
 export const DESTINATION_THEME_OPTIONS = [

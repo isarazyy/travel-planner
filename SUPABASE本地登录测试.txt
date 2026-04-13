@@ -1,0 +1,69 @@
+本地把「登录 / 注册」跑通 — 按顺序做即可（约 10 分钟）
+
+────────────────────────────────────────
+1）新建 Supabase 项目
+────────────────────────────────────────
+浏览器打开：https://supabase.com/dashboard
+登录 → New project → 设数据库密码 → 选区域 → Create project（等初始化完成）
+
+────────────────────────────────────────
+2）拿到两个环境变量
+────────────────────────────────────────
+左侧：Project Settings（齿轮）→ API
+
+复制：
+  • Project URL           → 填到 .env.local 的 NEXT_PUBLIC_SUPABASE_URL=
+  • anon public 那一串 key → 填到 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+保存 .env.local 后务必「重启」终端里的 npm run dev
+
+────────────────────────────────────────
+3）建表（必须）
+────────────────────────────────────────
+左侧：SQL Editor → New query
+打开本仓库文件：supabase/schema.sql
+全选复制 → 粘贴到 SQL Editor → Run
+
+（若已执行过报错，可先忽略；schema 已支持重复执行策略）
+
+────────────────────────────────────────
+4）方便本地测试：先关掉邮箱验证（可选但强烈建议）
+────────────────────────────────────────
+左侧：Authentication → Providers → Email
+
+  • Enable Email provider：开启
+  • 「Confirm email」类选项：先关掉（不同界面文案可能为 Confirm email / 需要验证邮箱）
+
+这样注册后可以立刻用邮箱+密码登录，不用收邮件。
+
+以后上线再打开邮箱验证即可。
+
+────────────────────────────────────────
+5）回调地址（一般默认即可，若登录后跳转异常再配）
+────────────────────────────────────────
+Authentication → URL Configuration
+
+  • Site URL：http://localhost:3000
+  • Redirect URLs 增加：http://localhost:3000/**
+
+────────────────────────────────────────
+6）在本项目里测试
+────────────────────────────────────────
+npm run dev
+浏览器：http://localhost:3000/register  → 注册一个邮箱+密码（至少 6 位）
+再打开：http://localhost:3000/login     → 登录
+
+成功后顶栏会显示邮箱，「历史行程」在配置好表结构后可正常用（当前行程数据若未接保存 API 可能仍为空，属正常）。
+
+────────────────────────────────────────
+常见问题
+────────────────────────────────────────
+• 浏览器控制台 / 页面提示 Failed to fetch：
+  - 国内网络访问 *.supabase.co 可能不稳定，可换网络、开全局代理后再试。
+  - 确认 NEXT_PUBLIC_SUPABASE_URL 与控制台「设置 → API」顶部 Project URL 完全一致（无多余空格）。
+  - 在「设置 → API」打开 Legacy API keys（旧版密钥）标签，复制 anon（以 eyJ 开头），替换
+    NEXT_PUBLIC_SUPABASE_ANON_KEY（比 sb_publishable_ 兼容性更好）。
+
+• Invalid API key：检查 .env.local 是否复制完整、是否重启 dev
+• Email not confirmed：回到第 4 步关掉确认邮箱，或去邮箱点确认链接
+• 数据库报错：确认第 3 步 schema 已 Run 成功

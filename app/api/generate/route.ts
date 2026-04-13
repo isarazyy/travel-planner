@@ -4,7 +4,7 @@ import { resolveGenerateModel } from '@/lib/qwen-models';
 import { buildMultiPlanPrompt, calendarTripDays } from '@/lib/prompts';
 import { buildHotelWebContextForPrompt } from '@/lib/hotel-web-search';
 import { buildTransportFoodWebContextForPrompt } from '@/lib/trip-web-search';
-import { fetchTripWeatherForPlan } from '@/lib/weather';
+import { fetchTripWeatherForPlan, backfillWeatherFromResult } from '@/lib/weather';
 import { TripFormData } from '@/lib/types';
 import { compareIso } from '@/lib/date-utils';
 import {
@@ -21,6 +21,8 @@ import { checkUsageLimit, setGuestUsageCookie, recordUsage } from '@/lib/usage-l
 import { getLastQwenUsage } from '@/lib/qwen';
 import { collectRealDataForTrip } from '@/lib/amap-data-collector';
 import { postEnrichTransitData } from '@/lib/post-enrich-transit';
+import { backfillDrivingData } from '@/lib/backfill-driving';
+import { createJob, updateJobStatus } from '@/lib/generation-job';
 
 /** 勿用用户输入顺序冒充推荐路线；仅表示「包含这些地点」。 */
 function fallbackRecommendedRoute(destinations: string[] | undefined): string {
@@ -97,8 +99,40 @@ function normalizeAccommodations(list: any[]): any[] {
   });
 }
 
+function isRangeString(v: any): v is string {
+  return typeof v === 'string' && /^\d+-\d+$/.test(v.trim());
+}
+
+function numToRange(n: number): string {
+  if (n <= 0) return '0';
+  const lo = Math.round(n * 0.85 / 50) * 50;
+  const hi = Math.round(n * 1.15 / 50) * 50;
+  return `${Math.max(0, lo)}-${hi}`;
+}
+
 function normalizePlanCosts(p: any) {
   const ai = p?.costBreakdown || {};
+
+  const hasRange = ['transport', 'accommodation', 'food', 'attractions', 'other', 'total']
+    .some(k => isRangeString(ai[k]));
+
+  if (hasRange) {
+    const pass = (v: any): string => {
+      if (isRangeString(v)) return v.trim();
+      const n = toNum(v);
+      return numToRange(n);
+    };
+    const cb = {
+      transport: pass(ai.transport),
+      accommodation: pass(ai.accommodation),
+      food: pass(ai.food),
+      attractions: pass(ai.attractions),
+      other: pass(ai.other),
+      total: pass(ai.total),
+    };
+    return { cost_breakdown: cb, estimated_total: cb.total };
+  }
+
   const transport = toNum(ai.transport);
   const accommodation = toNum(ai.accommodation);
   const food = toNum(ai.food);
@@ -118,10 +152,15 @@ function normalizePlanCosts(p: any) {
     return { cost_breakdown: est, estimated_total: est.total };
   }
 
-  return {
-    cost_breakdown: { transport, accommodation, food, attractions, other, total },
-    estimated_total: total,
+  const cb = {
+    transport: numToRange(transport),
+    accommodation: numToRange(accommodation),
+    food: numToRange(food),
+    attractions: numToRange(attractions),
+    other: numToRange(other),
+    total: numToRange(total),
   };
+  return { cost_breakdown: cb, estimated_total: cb.total };
 }
 
 /** 长行程需要更多输出 token，避免 JSON 截断导致 itinerary 只有几天 */
@@ -229,7 +268,9 @@ export async function POST(request: NextRequest) {
   }
 
   const isFast = formData.generationMode === 'fast';
+  const isRegenerate = !!formData.regenerate;
   const isMountainRun = formData.preferences?.motoRideType === 'mountain_run';
+  const hasSelfDriveMode = modes.some((m: string) => ['self_drive', 'motorcycle'].includes(m));
   const lockedDayCount =
     formData.dateMode === 'fixed' && formData.startDate && formData.endDate
       ? calendarTripDays(formData.startDate, formData.endDate)
@@ -318,35 +359,24 @@ export async function POST(request: NextRequest) {
     return { ...result, saveLocal: true };
   }
 
-  const stream = streamWithKeepAlive(async () => {
+  /** Core generation logic — shared between SSE and async modes */
+  async function runGeneration(): Promise<Record<string, unknown>> {
     const emptyWeather = {
       promptText: '',
       payload: { source: 'open-meteo' as const, timezone: 'Asia/Shanghai', locations: [] },
     };
 
-    // Mountain run: skip hotel/transport enrichment, only fetch weather
     if (isMountainRun) {
       const weatherRes = await fetchTripWeatherForPlan(formData).catch(() => emptyWeather);
       const { promptText: weatherContext, payload: weatherPayload } = weatherRes || emptyWeather;
-
       const prompt = buildMultiPlanPrompt(formData, { weatherContext });
-      const maxTokens = 4500;
-      const timeoutMs = 60000;
-
-      try {
-        const raw = await callQwen(prompt, {
-          maxTokens,
-          temperature: 0.85,
-          timeoutMs,
-          model: resolveGenerateModel(false),
-          enableSearch: true,
-        });
-        const parsed = parseJsonResponse(raw);
-        const built = buildResult(parsed, false, false, weatherPayload);
-        return maybePersist(built as Record<string, unknown>);
-      } catch (err: any) {
-        throw new Error(err.message || '生成失败');
-      }
+      const raw = await callQwen(prompt, {
+        maxTokens: 4500, temperature: 0.85, timeoutMs: 60000,
+        model: resolveGenerateModel(false), enableSearch: true,
+      });
+      const built = buildResult(parseJsonResponse(raw), false, false, weatherPayload);
+      if (hasSelfDriveMode) await backfillDrivingData(built as Record<string, unknown>);
+      return maybePersist(built as Record<string, unknown>);
     }
 
     const [hotelRes, weatherRes, transportFoodRes, realDataRes] = await Promise.allSettled([
@@ -355,12 +385,6 @@ export async function POST(request: NextRequest) {
       buildTransportFoodWebContextForPrompt(formData),
       collectRealDataForTrip(formData),
     ]);
-    if (hotelRes.status === 'rejected') console.error('[generate] hotel web context failed:', hotelRes.reason);
-    if (weatherRes.status === 'rejected') console.error('[generate] weather fetch failed:', weatherRes.reason);
-    if (transportFoodRes.status === 'rejected') {
-      console.error('[generate] transport/food web context failed:', transportFoodRes.reason);
-    }
-    if (realDataRes.status === 'rejected') console.error('[generate] amap real data failed:', realDataRes.reason);
 
     const hotelWebContext = hotelRes.status === 'fulfilled' ? hotelRes.value.contextText : '';
     const hotelWebSearchUsed = true;
@@ -370,38 +394,24 @@ export async function POST(request: NextRequest) {
     const { promptText: weatherContext, payload: weatherPayload } =
       weatherRes.status === 'fulfilled' ? weatherRes.value : emptyWeather;
 
-    if (process.env.NODE_ENV === 'development') {
-      if (realDataContext) {
-        console.log(`[generate] 高德数据: ${realDataContext.length}字`);
-      } else {
-        console.warn('[generate] 高德真实数据为空');
-      }
-    }
-
-    const prompt = buildMultiPlanPrompt(formData, {
-      hotelWebContext,
-      weatherContext,
-      transportFoodContext,
-      realDataContext,
+    let prompt = buildMultiPlanPrompt(formData, {
+      hotelWebContext, weatherContext, transportFoodContext, realDataContext,
     });
+    if (isRegenerate) {
+      prompt += '\n\n【重新生成要求】用户对上一次方案不满意，请给出完全不同的方案：换不同的景点组合、不同的游玩路线顺序、不同的餐厅和住宿推荐。不要重复上次的内容。';
+    }
     const maxTokens = computeMaxTokens(isFast, lockedDayCount);
     const timeoutMs = computeTimeoutMs(isFast, lockedDayCount);
 
     try {
       const raw = await callQwen(prompt, {
-        maxTokens,
-        temperature: isFast ? 0.2 : 0.35,
-        timeoutMs,
-        model: resolveGenerateModel(isFast),
-        enableSearch: true,
+        maxTokens, temperature: isRegenerate ? 0.85 : (isFast ? 0.2 : 0.35), timeoutMs,
+        model: resolveGenerateModel(isFast), enableSearch: true,
       });
-      const built = buildResult(
-        parseJsonResponse(raw),
-        hotelWebSearchUsed,
-        transportFoodWebSearchUsed,
-        weatherPayload,
-      );
+      const built = buildResult(parseJsonResponse(raw), hotelWebSearchUsed, transportFoodWebSearchUsed, weatherPayload);
+      await backfillWeatherFromResult(built as Record<string, unknown>, formData);
       if (!isFast) await postEnrichTransitData(built as Record<string, unknown>);
+      if (hasSelfDriveMode) await backfillDrivingData(built as Record<string, unknown>);
       return maybePersist(built as Record<string, unknown>);
     } catch (err: any) {
       const msg = String(err?.message || '');
@@ -413,28 +423,51 @@ export async function POST(request: NextRequest) {
       const fbTokens = computeMaxTokens(true, fbDays);
       const fallbackPrompt = `${prompt}\n\n【降级重试要求】\n请只返回1个最可执行方案。若用户为固定日期，itinerary 必须恰好覆盖从出发到返程的每一天（day 连续、每天一条），每天只写2-3条核心活动，不可漏天。`;
       const raw = await callQwen(fallbackPrompt, {
-        maxTokens: fbTokens,
-        temperature: 0.2,
+        maxTokens: fbTokens, temperature: 0.2,
         timeoutMs: Math.min(130000, 25000 + fbTokens * 12),
-        model: 'qwen-turbo',
-        enableSearch: true,
+        model: 'qwen-turbo', enableSearch: true,
       });
-      const built = buildResult(
-        parseJsonResponse(raw),
-        hotelWebSearchUsed,
-        transportFoodWebSearchUsed,
-        weatherPayload,
-        true,
-      );
+      const built = buildResult(parseJsonResponse(raw), hotelWebSearchUsed, transportFoodWebSearchUsed, weatherPayload, true);
+      await backfillWeatherFromResult(built as Record<string, unknown>, formData);
       if (!isFast) await postEnrichTransitData(built as Record<string, unknown>);
+      if (hasSelfDriveMode) await backfillDrivingData(built as Record<string, unknown>);
       return maybePersist(built as Record<string, unknown>);
     }
-  });
+  }
+
+  // --- Async mode for logged-in users ---
+  if (userId) {
+    const jobId = await createJob(userId, formData);
+    if (jobId) {
+      // Record usage immediately
+      recordUsage(userId, 'generation', null).catch(() => {});
+
+      // Fire-and-forget: run generation in background
+      (async () => {
+        try {
+          await updateJobStatus(jobId, 'running');
+          const result = await runGeneration();
+          const tripId = typeof result.savedTripId === 'string' ? result.savedTripId : undefined;
+          await updateJobStatus(jobId, 'done', { result, trip_id: tripId });
+          console.log('[job]', jobId, 'done, tripId:', tripId);
+        } catch (err: any) {
+          console.error('[job]', jobId, 'failed:', err.message);
+          await updateJobStatus(jobId, 'error', { error_message: err.message || '生成失败' });
+        }
+      })();
+
+      return NextResponse.json({ jobId, async: true });
+    }
+    // If job creation failed (e.g. table doesn't exist), fall through to SSE mode
+    console.warn('[generate] job creation failed, falling back to SSE');
+  }
+
+  // --- SSE mode for guests (or fallback) ---
+  const stream = streamWithKeepAlive(() => runGeneration());
 
   const headerInit = sseHeaders();
   const headers = new Headers(headerInit);
 
-  // Increment usage: guest cookie or logged-in user profile
   if (!usageCheck.userId) {
     const newCount = (usageCheck.guestCount ?? 0) + 1;
     setGuestUsageCookie(headers, newCount);

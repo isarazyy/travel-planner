@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Header from "@/components/Header";
+import GeneratingBanner from "@/components/GeneratingBanner";
 
 export const metadata: Metadata = {
   title: "旅行规划师 - 你的专属旅行定制工具",
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="antialiased bg-gray-50 min-h-screen">
         <Header />
         <main>{children}</main>
+        <GeneratingBanner />
       </body>
     </html>
   );

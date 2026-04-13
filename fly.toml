@@ -1,0 +1,28 @@
+# fly.toml app configuration file generated for travel-planner-zy on 2026-04-10T11:22:14+08:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'travel-planner-zy'
+primary_region = 'nrt'
+
+[build]
+  [build.args]
+    NEXT_PUBLIC_SUPABASE_URL = "https://okopihgxwjmjikajpzyv.supabase.co"
+    NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9rb3BpaGd4d2ptamlrYWpwenl2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ4NDgyOTgsImV4cCI6MjA5MDQyNDI5OH0.JVn4uQcG1asoVnyldYavHR9CCTe5KLNJSKiGtrUbYrI"
+    NEXT_PUBLIC_AMAP_KEY = "29bb20716dbd9bfbeeacd4ffe9225859"
+    NEXT_PUBLIC_AMAP_SECURITY_JSCODE = "0f5517f8f9334a2d3d325d7637a6fd21"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = 'suspend'
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ['app']
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024

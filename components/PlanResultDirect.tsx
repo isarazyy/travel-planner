@@ -1,7 +1,8 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { parseOrderedStopsFromRouteText } from '@/lib/trip-route-points';
 import { toPng } from 'html-to-image';
 import DayTimeline from './DayTimeline';
 import CostBreakdown from './CostBreakdown';
@@ -13,6 +14,7 @@ import { getDressAndUmbrellaAdvice } from '@/lib/weather-advice';
 import { parseSSEResponse } from '@/lib/parse-sse';
 import { createClient as createSupabaseClient } from '@/lib/supabase-browser';
 import RegisterPrompt from './RegisterPrompt';
+import { buildDianpingUrl, buildAmapNavUrl } from '@/lib/amap-uri';
 
 const TripRouteMap = dynamic(() => import('./TripRouteMap'), {
   ssr: false,
@@ -60,7 +62,7 @@ interface PlanData {
   accommodations: any[];
   food_spots: any[];
   cost_breakdown: any;
-  estimated_total: number;
+  estimated_total: number | string;
   tips: string[];
 }
 
@@ -109,11 +111,15 @@ export default function PlanResultDirect({
   plans,
   recommendations,
   hotelWebSearchUsed,
+  onRegenerate,
+  regenerating,
 }: {
   trip: TripData;
   plans: PlanData[];
   recommendations?: Recommendations;
   hotelWebSearchUsed?: boolean;
+  onRegenerate?: () => void;
+  regenerating?: boolean;
 }) {
   const exportRef = useRef<HTMLDivElement>(null);
   const [localPlans, setLocalPlans] = useState<PlanData[]>(plans);
@@ -145,6 +151,18 @@ export default function PlanResultDirect({
   activePlanRef.current = activePlan;
   const displayTips = activePlan ? normalizeTips(activePlan.tips) : [];
   const isFixedDates = trip.date_mode === 'fixed' && !!(trip.start_date && trip.end_date);
+
+  const effectiveDestinations = useMemo(() => {
+    const td = activePlan?.transport_detail;
+    if (!td) return trip.destinations || [];
+    const stops = parseOrderedStopsFromRouteText(td);
+    const dep = (trip.departure || '').replace(/\s+/g, '').toLowerCase();
+    const filtered = stops.filter((s) => {
+      const sk = s.replace(/\s+/g, '').toLowerCase();
+      return sk !== dep && !sk.includes(dep) && !dep.includes(sk);
+    });
+    return filtered.length > 0 ? filtered : (trip.destinations || []);
+  }, [activePlan?.transport_detail, trip.departure, trip.destinations]);
 
   useEffect(() => {
     if (!chatExpanded) return;
@@ -267,13 +285,14 @@ export default function PlanResultDirect({
       }
     }
 
-    lines.push(`## 费用`);
-    lines.push(`- 交通: ¥${activePlan.cost_breakdown?.transport ?? 0}`);
-    lines.push(`- 住宿: ¥${activePlan.cost_breakdown?.accommodation ?? 0}`);
-    lines.push(`- 餐饮: ¥${activePlan.cost_breakdown?.food ?? 0}`);
-    lines.push(`- 景点: ¥${activePlan.cost_breakdown?.attractions ?? 0}`);
-    lines.push(`- 其他: ¥${activePlan.cost_breakdown?.other ?? 0}`);
-    lines.push(`- 总计: ¥${activePlan.cost_breakdown?.total ?? activePlan.estimated_total ?? 0}`);
+    const fmtCost = (v: any) => v == null ? '¥0' : typeof v === 'string' ? (/^\d/.test(v) ? `¥${v}` : v) : `¥${v.toLocaleString()}`;
+    lines.push(`## 费用预估`);
+    lines.push(`- 交通: ${fmtCost(activePlan.cost_breakdown?.transport)}`);
+    lines.push(`- 住宿: ${fmtCost(activePlan.cost_breakdown?.accommodation)}`);
+    lines.push(`- 餐饮: ${fmtCost(activePlan.cost_breakdown?.food)}`);
+    lines.push(`- 景点: ${fmtCost(activePlan.cost_breakdown?.attractions)}`);
+    lines.push(`- 其他: ${fmtCost(activePlan.cost_breakdown?.other)}`);
+    lines.push(`- 总计: ${fmtCost(activePlan.cost_breakdown?.total ?? activePlan.estimated_total)}`);
     lines.push('');
     lines.push(`## 贴士`);
     for (const t of normalizeTips(activePlan.tips)) lines.push(`- ${t}`);
@@ -444,10 +463,10 @@ export default function PlanResultDirect({
         <TripRouteMap
           trip={{
             departure: trip.departure,
-            destinations: trip.destinations || [],
+            destinations: effectiveDestinations,
             destination: trip.destination,
           }}
-          recommendedRoute={recommendations?.route}
+          recommendedRoute={activePlan.transport_detail || recommendations?.route}
           itinerary={activePlan.itinerary || []}
           transportModes={trip.preferences?.transportModes}
           isMountainRun={trip.preferences?.motoRideType === 'mountain_run'}
@@ -478,41 +497,6 @@ export default function PlanResultDirect({
           </p>
         )}
       </div>
-
-      {/* Weather (Open-Meteo) */}
-      {recommendations?.weather && recommendations.weather.locations.length > 0 && (
-        <div className="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-blue-50/80 p-5 mb-6">
-          <h3 className="font-semibold text-sky-900 mb-2">🌤 目的地天气预报</h3>
-          {recommendations.weather.note && (
-            <p className="text-xs text-sky-800/90 mb-3 leading-relaxed">{recommendations.weather.note}</p>
-          )}
-          <div className="space-y-4">
-            {recommendations.weather.locations.map((loc, li) => (
-              <div key={`${loc.displayName}-${li}`} className="rounded-lg bg-white/70 border border-sky-100/80 p-3">
-                <p className="text-sm font-medium text-gray-900 mb-2">{loc.displayName}</p>
-                <div className="space-y-1.5 text-xs text-gray-700">
-                  {loc.days.map((d) => (
-                    <div
-                      key={d.date}
-                      className="flex flex-wrap items-start gap-x-3 gap-y-1 border-b border-sky-50/80 pb-1.5 last:border-0 last:pb-0"
-                    >
-                      <span className="text-gray-600 w-[5.5rem] shrink-0 tabular-nums text-[13px] leading-normal">
-                        {d.date}
-                      </span>
-                      <span className="font-medium text-sky-900">{d.condition}</span>
-                      <span>
-                        {d.tempMin}～{d.tempMax}℃
-                      </span>
-                      <span className="text-gray-500">降水概率 {d.precipProb}%</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="text-[11px] text-sky-700/70 mt-3">数据来源 Open-Meteo · 预报仅供参考，出行前请再查实时天气</p>
-        </div>
-      )}
 
       {/* Recommendations card */}
       {recommendations &&
@@ -549,25 +533,27 @@ export default function PlanResultDirect({
         </div>
       )}
 
-      {/* Plan tabs */}
-      <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-        {localPlans.map((plan, idx) => (
-          <button
-            key={idx}
-            onClick={() => setActiveIdx(idx)}
-            className={`flex flex-col items-start px-5 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition ${
-              activeIdx === idx
-                ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
-                : 'bg-white text-gray-600 border border-gray-100 hover:border-orange-200'
-            }`}
-          >
-            <span>{plan.planName}</span>
-            <span className={`text-xs mt-0.5 ${activeIdx === idx ? 'text-orange-100' : 'text-gray-400'}`}>
-              ¥{(plan.estimated_total || 0).toLocaleString()}
-            </span>
-          </button>
-        ))}
-      </div>
+      {/* Plan tabs — only show when multiple plans exist */}
+      {localPlans.length > 1 && (
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+          {localPlans.map((plan, idx) => (
+            <button
+              key={idx}
+              onClick={() => setActiveIdx(idx)}
+              className={`flex flex-col items-start px-5 py-3 rounded-xl text-sm font-medium whitespace-nowrap transition ${
+                activeIdx === idx
+                  ? 'bg-orange-500 text-white shadow-md shadow-orange-200'
+                  : 'bg-white text-gray-600 border border-gray-100 hover:border-orange-200'
+              }`}
+            >
+              <span>{plan.planName}</span>
+              <span className={`text-xs mt-0.5 ${activeIdx === idx ? 'text-orange-100' : 'text-gray-400'}`}>
+                {plan.estimated_total || ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Plan description */}
       {activePlan?.planDescription && (
@@ -610,7 +596,7 @@ export default function PlanResultDirect({
 
 
             {(activePlan.itinerary || []).map((day: any, i: number) => (
-              <DayTimeline key={i} day={day} tripWeather={recommendations?.weather ?? null} />
+              <DayTimeline key={i} day={day} tripWeather={recommendations?.weather ?? null} transportModes={trip.preferences?.transportModes} />
             ))}
 
             {displayTips.length > 0 && (
@@ -643,10 +629,11 @@ export default function PlanResultDirect({
                         {a.cost > 0 && <span className="text-xs text-orange-500">¥{a.cost}</span>}
                       </div>
                       <p className="text-xs text-gray-400 mt-0.5">{a.description}</p>
-                      <div className="flex gap-3 mt-1 text-xs text-gray-400">
-                        <span>{a.category}</span>
-                        <span>{a.duration}</span>
-                      </div>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {a.category}{a.duration ? ` · ${a.duration}` : ''}
+                        {' · '}
+                        <a href={buildAmapNavUrl(a.name)} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:underline">导航</a>
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -654,7 +641,7 @@ export default function PlanResultDirect({
             )}
 
             {(activePlan.accommodations?.length ?? 0) > 0 && (
-              <AccommodationList items={activePlan.accommodations} webSearchUsed={hotelWebSearchUsed} />
+              <AccommodationList items={activePlan.accommodations} webSearchUsed={hotelWebSearchUsed} city={trip.destinations?.[0] || trip.departure} />
             )}
 
             {(activePlan.food_spots?.length ?? 0) > 0 && (
@@ -665,16 +652,33 @@ export default function PlanResultDirect({
                     <div key={i} className="border-b border-gray-50 pb-3 last:border-0 last:pb-0">
                       <div className="flex items-center justify-between">
                         <span className="text-sm font-medium text-gray-900">{f.name}</span>
-                        <span className="text-xs text-orange-500">人均¥{f.avgCost}</span>
+                        <span className="text-xs text-orange-500">{f.avgCost ? `人均¥${f.avgCost}` : ''}</span>
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{f.type} · {f.area}</p>
-                      <p className="text-xs text-gray-500 mt-0.5">推荐：{f.specialty}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{f.type}{f.area ? ` · ${f.area}` : ''}</p>
+                      {f.specialty && <p className="text-xs text-gray-500 mt-0.5">推荐：{f.specialty}</p>}
+                      <p className="text-xs text-gray-400 mt-1">
+                        <a href={buildDianpingUrl(f.name, f.area)} target="_blank" rel="noopener noreferrer" className="text-green-600 hover:underline">大众点评</a>
+                        {' · '}
+                        <a href={buildAmapNavUrl(f.name, f.area)} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:underline">导航</a>
+                      </p>
                     </div>
                   ))}
                 </div>
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {onRegenerate && (
+        <div className="mt-10 mb-24 flex justify-center">
+          <button
+            onClick={onRegenerate}
+            disabled={regenerating}
+            className="px-6 py-3 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-xl hover:bg-orange-100 transition disabled:opacity-50"
+          >
+            {regenerating ? '生成中…' : '不满意？重新生成一套方案'}
+          </button>
         </div>
       )}
       </div>

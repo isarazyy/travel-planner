@@ -78,3 +78,27 @@ CREATE POLICY "users_crud_own_plans" ON trip_plans FOR ALL
 
 CREATE POLICY "service_role_plans" ON trip_plans FOR ALL
   USING (true) WITH CHECK (true);
+
+-- 4. Generation jobs table (async background generation)
+CREATE TABLE IF NOT EXISTS generation_jobs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending',
+  form_data JSONB NOT NULL DEFAULT '{}',
+  trip_id UUID REFERENCES trips(id) ON DELETE SET NULL,
+  result JSONB,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_generation_jobs_user_id ON generation_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_generation_jobs_status ON generation_jobs(status);
+
+ALTER TABLE generation_jobs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "users_read_own_jobs" ON generation_jobs FOR SELECT
+  USING (auth.uid() = user_id);
+
+CREATE POLICY "service_role_jobs" ON generation_jobs FOR ALL
+  USING (true) WITH CHECK (true);
