@@ -71,7 +71,7 @@ function resolvePaceDailyDensity(
 
 export function buildMultiPlanPrompt(
   data: TripFormData,
-  opts?: { hotelWebContext?: string; weatherContext?: string; transportFoodContext?: string; realDataContext?: string }
+  opts?: { hotelWebContext?: string; weatherContext?: string; transportFoodContext?: string; realDataContext?: string; optimizedRoute?: { order: string[]; description: string; totalKm: number } }
 ): string {
   const p = data.preferences;
   const destinations = data.destinations.join('、');
@@ -137,13 +137,25 @@ export function buildMultiPlanPrompt(
 
   const productCoreBlock = `
 
-【产品核心 — 行程密度由用户节奏决定】
-- 用户选择的节奏为「${paceDesc}」。**这是最重要的约束**，直接决定每天安排多少景点/活动。
-- itinerary 中**每个自然日**的 activities 数量须满足：**至少 ${density.min} 条、建议 ${density.max} 条以内**。${density.min <= 2 ? '用户选择了慢节奏，不要塞满行程，每天1-2个核心景点即可，其余时间留白。' : ''}
+【产品核心 — 行程密度由用户节奏决定（极其重要）】
+
+**活动分类定义（必须理解）：**
+- **景点活动**：游览景点、打卡地标、逛街区、看展览、体验项目、夜市/夜景/演出等 —— 这些才是用户真正想做的事
+- **后勤活动**：自驾/交通前往XX、午餐、晚餐、入住酒店 —— 这些是必要但不算"景点"
+
+用户选择的节奏为「${paceDesc}」。**这是最重要的约束**，直接决定每天安排多少**景点活动**。
+- itinerary 中**每个自然日**的**景点活动**（不含吃饭、开车、入住酒店）数量须满足：**至少 ${density.min} 个、建议 ${density.max} 个以内**。${density.min <= 2 ? '用户选择了慢节奏，不要塞满行程，每天1-2个核心景点即可，其余时间留白。' : ''}
+- 加上午餐、晚餐、交通、入住酒店，每天的总 activities 条数通常在 **${density.min + 3}～${density.max + 4} 条**。
+- **反面案例（绝对禁止）**：一天只有"自驾前往XX → 午餐 → 1个景点 → 入住酒店 → 晚餐"共5条，其中景点只有1个。这**不符合**用户选择的「${paceDesc}」节奏。
 - 时段覆盖要求：${density.coverage}
+- **晚间安排**：${density.min >= 3 ? '每天晚餐后必须有至少1项晚间活动（夜市、夜景、散步老街、酒吧、演出、广场等），不能晚餐就结束一天。' : '多数日期建议有1项轻量晚间活动（散步、夜景等），避免每天晚餐后就结束。'}
 - **抵达/首末日**：若涉及机场/高铁到达，须额外写出「入住后傍晚」或「返程前上午」至少 1 项可执行安排，不得让整天停在「抵达机场」一条上结束。
-- **纯转场日**：可略少 1 条，但仍须写清交通段 + 到达后 1～2 项轻量活动（安顿、简餐、周边散步）。
-- **返程必须在最后一天**：返回出发地的交通（自驾/高铁/飞机）必须安排在 itinerary 的**最后一天**。严禁出现"倒数第二天已经回到出发地，最后一天凑一个'返程准备/自由活动/整理行李'"这种空洞安排。如果倒数第二天下午就能到家，就把返程合并到那天，让最后一天在目的地多玩半天再返程。
+- **纯转场日（有长途驾车）**：即使上午在路上，下午到达后也要安排**至少 ${Math.max(2, density.min - 1)} 个景点活动**（到达城市的核心景点、老街、公园、地标等）+ 晚间活动（夜市、夜景、散步街区等）。不能只有"开车→吃饭→1个景点→睡觉"。到一个新城市的第一个下午+晚上完全够安排 3-4 个景点。
+- **返程必须在最后一天（最高优先级规则）**：
+  - 返回出发地的交通必须安排在 itinerary 的**最后一天**，且**那天不能在出发地安排任何景点游览**（到家就结束）。
+  - **绝对禁止**：倒数第二天回到出发地 → 最后一天凑"返程准备/自由活动/整理行李/游览出发地景点"。这是最差体验，用户对此极度反感。
+  - **正确做法**：如果行程天数比路线需要的多（比如8天但7天就够了），**多出来的天留在目的地城市深度游**（多安排景点、深度体验、周边一日游），最后一天再返程。宁可在目的地多玩一天，也绝不提前回家然后凑空天。
+  - **举例**：8天行程去山东7个城市，不是D7回北京+D8空着，而是在某个城市（如青岛或烟台）多待一天深度游，D8最后一天从济南返回北京。
 - attractions / foodSpots 作为「亮点清单」须与 itinerary 相互呼应，不得出现 itinerary 很空但 attractions 堆砌的脱节。
 
 【用餐安排 — 硬性要求，每天必须有】
@@ -151,6 +163,7 @@ export function buildMultiPlanPrompt(
 - 午餐时间：11:30-13:30 之间安排，**绝对不能把午餐排到 15:00 以后**。
 - 晚餐时间：17:30-19:30 之间安排。
 - 用餐活动要推荐当地特色餐厅/小吃，带 foodRecommendation（店名、评分、招牌菜、推荐理由）。
+- **餐饮黑名单（绝对禁止推荐）**：必胜客、肯德基、麦当劳、德克士、汉堡王、星巴克、瑞幸、华莱士、沙县小吃、兰州拉面（非兰州地区的连锁）、黄焖鸡米饭、杨铭宇、正新鸡排等**全国连锁快餐/咖啡**。用户出来旅游是体验当地美食，不是吃家门口就能吃到的东西。必须推荐**本地特色、高评分、有口碑**的餐厅/小吃。
 - 如果当天有长途驾车/乘车，在途中合适的城镇安排用餐，不能跳过。
 - 即使是轻松休闲日，也必须写出午餐和晚餐的安排，哪怕只是"酒店附近觅食"也要有一条。`;
 
@@ -222,11 +235,23 @@ export function buildMultiPlanPrompt(
 - tips 必须包含：装备建议（全盔/护具/骑行服/雨衣/手套/骑行靴）、天气和风况提醒、高原反应提醒（如涉及高海拔）、夜骑风险、链条保养、每日骑行前车辆检查要点
 - 风格参考小红书/抖音热门摩旅攻略：强调"路线体验感"和"可执行性"`;
 
+  const optimizedRoute = opts?.optimizedRoute;
+
   let destinationLine = '';
   if (data.destinationMode === 'specific') {
-    destinationLine = `- 用户想去的地方（集合）：${destinations}
-  **重要：以上是「必去地点清单」，用户输入的先后顺序没有任何含义，不代表游玩顺序或交通顺序。**
-  你要扮演专业路线规划助手：根据地理方位、减少折返、用户选的交通方式（${transports}）、节奏（${paceDesc}）、天数与季节合理性，自主决定**先去哪里、后去哪里、如何衔接**，并在行程中严格执行该顺序。`;
+    if (optimizedRoute) {
+      const routeStr = `${data.departure}→${optimizedRoute.order.join('→')}→${data.departure}`;
+      destinationLine = `- 用户想去的地方：${destinations}
+  **【路线已由算法预计算，你必须严格遵守以下顺序，不可调整】**
+  最优游览顺序已确定：**${routeStr}**
+  你的任务：**按照上述城市顺序安排每天的行程**，不可改变城市间的先后顺序。recommendedRoute 字段写这条路线并简要说明为何这样走合理（如"环线不走回头路"等，不要提算法或TSP）。
+  交通方式：${transports}｜节奏：${paceDesc}`;
+    } else {
+      destinationLine = `- 用户想去的地方（无序集合，输入顺序无任何含义）：${destinations}
+  **核心任务：用户不知道路线怎么走合理，这些城市怎么串联才不绕路完全由你决定。**
+  你必须先在脑中画出这些城市的地理分布，然后规划一条从${data.departure}出发、不走回头路的最优环线（或线路），最后回到${data.departure}。
+  交通方式：${transports}｜节奏：${paceDesc}｜严禁按上面的文字排列顺序安排行程。`;
+    }
   } else if (data.destinationMode === 'theme') {
     const themeMap: Record<string, string> = {
       seaside: '海边',
@@ -592,13 +617,37 @@ ${mrAccomNote}
 11. **弯道/路况描述必须对应该条路线的真实情况**，不同路线的特征不能混用`;
   }
 
+  const routePlanningBlock = optimizedRoute
+    ? `【路线顺序 — 已由算法预计算，严格遵守】
+最优游览顺序已确定：**${data.departure}→${optimizedRoute.order.join('→')}→${data.departure}**
+- **你必须按此顺序安排行程，不可调整城市先后顺序**
+- recommendedRoute 字段直接写这条路线
+- transportDetail 必须体现这条路线的城市间移动顺序
+- itinerary 按天展开时，地点出现顺序必须与此路线一致
+- **每日驾车时间约束**：单日驾车控制在3-4小时以内（最多不超过5小时）。如果两城之间超过4小时车程，考虑在中间城市停留过夜`
+    : `【智能路线规划 — 最高优先级，决定整个方案质量】
+用户告诉你想去哪些地方，但**不知道路线怎么走最合理**——这正是你存在的核心价值。你必须像专业导游一样规划最优路线，绝对不能偷懒按输入顺序排列。
+
+**路线规划四步法（必须执行）：**
+1. **画地图**：在脑中标出出发地和所有目的地的地理位置（东南西北关系）
+2. **找环线**：从出发地出发，规划一条**不走回头路的环形路线**——要么顺时针要么逆时针绕一圈回到出发地。如果不适合环线（如出发地在一端），则规划"一笔画"式线路
+3. **就近串联**：每到一个城市后，下一个城市必须是**剩余未去城市中地理上最近的**，严禁跳过途中城市去远处再折返
+4. **自检**：检查最终路线的总公里数，确认没有明显绕路。如果发现某段路需要经过一个已经去过的城市，说明路线有问题，必须重排
+
+**具体规则：**
+- recommendedRoute 字段必须写清推荐顺序（用箭头连接），并**说明为何这样排**（减少回头路、就近串联等）
+- transportDetail 必须体现城市间的**实际移动顺序**，与 itinerary 每天的地理位置变化一致
+- itinerary 按天展开时，地点出现顺序必须与优化路线一致
+- **环线质量三条铁律（同时满足，缺一不可）**：
+  1. **不交叉**：把所有城市在地图上连线，线路不能有交叉。想象一根绳子串所有城市，绳子不能打结
+  2. **不跳跃**：相邻两站之间不能跳过中间的目的地城市。如果A和C之间有个B也要去，必须走A→B→C
+  3. **返程合理**：最后一站回出发地的距离不能太远。如果最后一站距出发地超过500km，说明环线方向选错了——应该反转方向，让离出发地近的城市排在最后
+- **选择环线方向的方法**：确定好环形顺序后，比较顺时针和逆时针哪个方向的「最后一站→出发地」距离更短，选短的那个
+- **每日驾车时间约束**：单日驾车控制在3-4小时以内（最多不超过5小时）。如果两城之间超过4小时车程，考虑在中间城市停留过夜`;
+
   return `请为我制定一份旅行规划。
 
-【智能路线规划 — 核心要求】
-- 若用户给了多个具体地点：你必须输出**你优化后的**游览与移动顺序，禁止默认按用户输入列表从左到右安排行程。
-- recommendedRoute 字段必须写清推荐顺序（可用箭头连接），并**简短说明为何这样排**（例如：减少回头路、枢纽城市进出、海拔适应、顺路衔接等），写在同一段文字里即可。
-- transportDetail 必须体现城市/区域之间的**实际移动顺序**及建议交通方式，与 itinerary 每天的地理位置变化一致。
-- itinerary 按天展开时，地点出现顺序必须与上述优化路线一致，不要出现「昨天在西边、今天又折返到东边再回西边」这类明显不合理折返（除非用户有特殊要求）。
+${routePlanningBlock}
 
 【地理与交通 — 必须遵守】
 - 你掌握中国行政区划常识：**景德镇在江西，乌镇（浙江嘉兴）与江西不相邻**，二者之间不能用「大巴约2–3小时顺路直达」这类表述；跨省长距离应写**高铁/动车经南昌、杭州、上海等枢纽**及**大致合理时长**（可写区间），不得编造过短陆路时间。
@@ -655,7 +704,7 @@ ${productCoreBlock}
 - location、notes 简洁（10-20字）
 - accommodations 每项只写 name、pricePerNight、area、pros（1条）、cons（1条）
 - food_spots 每项只写 name、cuisine、priceRange、rating
-${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）**：每天 activities 严格 **2-3 条**（上午+下午+可选晚间），描述从简。**宁可每天少一条活动，也绝对不能漏掉任何一天！全部 ${fixedDayCount} 天必须写完。**` : fixedDayCount && fixedDayCount > 5 ? `- **中等行程（${fixedDayCount}天）**：每天 activities 控制在 **3-4 条**，描述从简。` : `- 每天 activities 3-5 条`}
+${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）**：每天 activities **3-4 条景点活动**+吃饭交通，描述从简。**宁可每条描述短一点，也绝对不能漏天！全部 ${fixedDayCount} 天必须写完。**` : `- 每天 activities 数量必须符合上文「产品核心」的景点活动要求（${density.min}-${density.max}个景点 + 吃饭交通入住），描述从简`}
 
 请严格按以下JSON格式返回（不要任何额外文字）：
 
@@ -673,12 +722,29 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
         {
           "day": 1,
           "date": "${jsonDateFieldExample}",
-          "theme": "当天主题",
+          "theme": "抵达青岛·老城初探",
           "activities": [
-            {"time": "上午出发", "activity": "乘高铁前往南昌", "location": "北京西站→南昌西站", "duration": "约4～5小时", "cost": 0, "notes": "建议提前在12306查询车次并购票", "transportInfo": {"fromStation": "北京西站", "toStation": "南昌西站", "duration": "约4～5小时", "priceNote": "请在12306查询具体车次与票价"}},
-            {"time": "09:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约5小时", "cost": 0, "notes": "途经G2京沪高速转G22青兰高速，沿途可在淄博服务区休息", "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约5小时", "priceNote": "油费及过路费预估600元"}},
-            {"time": "16:00", "activity": "入住酒店并休整", "location": "八一广场", "duration": "约1小时", "cost": 0, "stayInfo": {"hotelName": "全季南昌八一广场店", "pricePerNight": 360}},
-            {"time": "19:00", "activity": "晚餐探店", "location": "万寿宫历史文化街区", "duration": "约1.5小时", "cost": 120, "foodRecommendation": {"shopName": "邓氏瓦罐汤（万寿宫店）", "rating": 4.7, "specialty": "招牌瓦罐汤/南昌拌粉", "reason": "大众点评高分老店，本地人常去，汤底浓郁"}}
+            {"time": "08:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约5小时", "cost": 0, "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约5小时", "priceNote": "油费+过路费约600元"}},
+            {"time": "11:30", "activity": "途中午餐", "location": "沿途服务区", "duration": "约1小时", "cost": 80, "foodRecommendation": {"shopName": "服务区当地小吃", "rating": 4.0, "specialty": "快餐"}},
+            {"time": "14:00", "activity": "游览栈桥", "location": "青岛栈桥", "duration": "约1小时", "cost": 0, "notes": "青岛标志性景点"},
+            {"time": "15:30", "activity": "漫步中山路老街区", "location": "中山路商业街", "duration": "约1.5小时", "cost": 0},
+            {"time": "17:00", "activity": "入住酒店", "location": "五四广场附近", "duration": "约0.5小时", "cost": 0, "stayInfo": {"hotelName": "全季青岛五四广场店", "pricePerNight": 400}},
+            {"time": "18:00", "activity": "晚餐探店", "location": "青岛市南区", "duration": "约1.5小时", "cost": 120, "foodRecommendation": {"shopName": "船歌鱼水饺（闽江路店）", "rating": 4.7, "specialty": "鲅鱼水饺/海鲜", "reason": "本地高分连锁"}},
+            {"time": "20:00", "activity": "夜游五四广场+奥帆中心", "location": "五四广场", "duration": "约1小时", "cost": 0, "notes": "夜景灯光秀"}
+          ]
+        },
+        {
+          "day": 2,
+          "date": "（全天在同一城市的示例 — 景点活动更多）",
+          "theme": "青岛深度游",
+          "activities": [
+            {"time": "08:30", "activity": "游览八大关风景区", "location": "八大关", "duration": "约2小时", "cost": 0},
+            {"time": "11:00", "activity": "参观青岛啤酒博物馆", "location": "登州路", "duration": "约1.5小时", "cost": 60},
+            {"time": "12:30", "activity": "午餐", "location": "台东步行街", "duration": "约1小时", "cost": 80, "foodRecommendation": {"shopName": "王姐烧烤（台东店）", "rating": 4.5, "specialty": "烤鱿鱼/烤肉串"}},
+            {"time": "14:00", "activity": "游览信号山公园", "location": "信号山", "duration": "约1.5小时", "cost": 15, "notes": "山顶可俯瞰老城区红瓦绿树"},
+            {"time": "16:00", "activity": "逛大学路咖啡街区", "location": "大学路", "duration": "约1小时", "cost": 40},
+            {"time": "17:30", "activity": "晚餐", "location": "青岛市南区", "duration": "约1.5小时", "cost": 150},
+            {"time": "19:30", "activity": "夜逛台东夜市", "location": "台东步行街", "duration": "约1.5小时", "cost": 50, "notes": "青岛最热闹的夜市"}
           ]
         }
       ],
@@ -730,16 +796,19 @@ ${notePlanDaysLine}
 2. 所有费用是${data.peopleCount}人的总费用（人民币元），**用范围表示**（如"800-1200"），不要给精确到个位的数字。自驾/骑行的 transport 须包含油费和过路费预估范围。
 3. 费用要合理，符合${budgetDesc}的预算水平
 4. 只生成 1 个方案，plans 数组恰好 1 个元素。用户的出行方式为「${transports}」，方案中的交通方式**必须与此一致**，不得擅自换成其他交通方式
-5. 若给了具体目的地：方案必须**全部涵盖**这些地点，但**游览与交通顺序完全由你优化**，不得机械按用户输入顺序串联；若没给具体目的地，你需要先推荐目的地再排路线
+5. 若给了具体目的地：方案必须**全部涵盖**这些地点。**路线顺序是你最重要的工作**——必须按上文「智能路线规划四步法」输出地理上最优的环线/线路，严禁按用户输入顺序排列。若没给具体目的地，你需要先推荐目的地再排路线
 ${noteRecommendedDaysLine}
 7. 每天的第一个活动时间根据旅行节奏合理安排（轻松节奏可晚些出发，紧凑节奏早些出发）
 8. ${fixedDayCount != null ? 'itinerary 每项的 date 为真实公历日期；theme 仍写当天主题' : 'date 字段用 "Day 1", "Day 2" 这样的格式'}
 9. 顶层必须包含 nearbySuggestions 字符串字段。${fixedDayCount != null ? '固定日期下须按上文详写顺路/半日周边玩法。' : '日期未固定时可填空字符串，或简要写出若采用某路线时的顺路可玩点。'}
 10. ${hotelAccommodationRules}
 11. ${outputLimitText}${selfDriveGuide}${motorcycleGuide}
-12. attractions 清单须饱满：固定日期时至少 **${fixedDayCount != null ? Math.min(Math.max(fixedDayCount * 2, 10), 36) : 10}** 个「景点/体验/街区/观景点」条目，并与 itinerary 中实际游玩内容对应；非固定日期至少 10 个。
-13. 若用户填写了「不想去的地方」：attractions 与 itinerary 均不得出现与用户否决项冲突的内容（例如用户拒绝博物馆时，不得出现博物馆/美术馆/室内展览类推荐）。
-14. 严格遵守上文「地理与交通」「行程字段」；若输出被截断导致字段缺失，应优先保证**每日 activities 条数与时段覆盖**、四项字符串完整、tips 至少 2 条${noteLongTripBlock}`;
+12. **attractions 是「推荐景点」清单，必须只放真正的景点/体验/街区/观景点**。严禁把「自驾前往XX」「午餐」「晚餐」「入住酒店」放进 attractions。至少 **${fixedDayCount != null ? Math.min(Math.max(fixedDayCount * 2, 10), 36) : 10}** 个条目。
+13. **accommodations 住宿推荐必须有**：至少 3 条具体酒店/民宿，每条含 name、pricePerNight、pros、cons。这是用户非常关注的内容，绝对不能为空。
+14. **foodSpots 美食推荐必须有**：至少 3 条高评分餐厅/小吃。
+15. 若用户填写了「不想去的地方」：attractions 与 itinerary 均不得出现与用户否决项冲突的内容。
+16. **输出效率**：itinerary 中每条 activity 的 notes 不要写长段落，1-2 句即可；把 token 省给 attractions/accommodations/foodSpots，保证这些列表不被截断。
+17. 严格遵守上文「地理与交通」「行程字段」；tips 至少 2 条中文${noteLongTripBlock}`;
 }
 
 export function buildPlanEditPrompt(args: {
@@ -847,6 +916,7 @@ export function buildPlanEditPrompt(args: {
 7. 若涉及住宿调整：每项保留 pros、cons、webNote；联网场景下 webNote 须体现「据检索摘要归纳」
 8. 地理与交通须符合常识（如江西景德镇至浙江乌镇应写高铁经杭州/上海等枢纽中转及合理耗时，禁止「大巴2–3小时直达」）；itinerary 每条 activities 的 time、activity、location、duration 须为非空中文字符串，禁止 undefined/null 字面；tips 至少 2 条中文
 9. 若当前方案「每天 activities 过少、下午或晚间空白」：在总天数与返程日不变前提下，按**上午+下午+晚间**补齐可执行安排（除非用户明确要求极简）
+15. **禁止出现"返程准备""自由活动""整理行李"凑天数**：如果某天已经回到出发地（如D7已经到北京），后面的天就不应该再有空洞的"返程准备"之类的安排。正确做法是把返程安排在行程最后一天，返程之前的时间留在目的地多玩。如果路线调整后实际行程不需要那么多天，宁可让最后一两天在目的地深度游（多安排景点、美食体验），也不要提前回家然后凑空天。
 10. 若用户要求"更直观价格"：住宿名称后可直接带价格（如「全季XX店（约¥320/晚）」）；若有天气信息，相关天的 notes 增加一句穿衣/雨具建议
 11. 若当前活动已有 transportInfo/stayInfo/foodRecommendation 等结构化字段，除非用户明确要求删除，否则应保留并按新需求更新
 12. 修改后须清除与用户否决项冲突的内容（例如用户拒绝博物馆却仍出现「某某博物馆」时应删除并替换为合规活动）

@@ -17,6 +17,40 @@ function isTimeoutLike(msg: string): boolean {
   return /(超时|timeout|Abort|ETIMEDOUT|aborted)/i.test(msg);
 }
 
+function toNum(v: any): number {
+  if (typeof v === 'number') return v;
+  if (typeof v === 'string') {
+    const m = v.match(/^(\d+)-(\d+)$/);
+    if (m) return (Number(m[1]) + Number(m[2])) / 2;
+    const n = Number(v.replace(/[^\d.]/g, ''));
+    return isNaN(n) ? 0 : n;
+  }
+  return 0;
+}
+
+function isRangeStr(v: any): v is string {
+  return typeof v === 'string' && /^\d+-\d+$/.test(v.trim());
+}
+
+function numToRange(n: number): string {
+  if (n <= 0) return '0';
+  const lo = Math.round(n * 0.85 / 50) * 50;
+  const hi = Math.round(n * 1.15 / 50) * 50;
+  return `${Math.max(0, lo)}-${hi}`;
+}
+
+function normalizeCostToRange(cb: Record<string, any>): Record<string, any> {
+  const keys = ['transport', 'accommodation', 'food', 'attractions', 'other', 'total'];
+  const out: Record<string, string> = {};
+  for (const k of keys) {
+    const v = cb[k];
+    if (isRangeStr(v)) { out[k] = v.trim(); continue; }
+    const n = toNum(v);
+    out[k] = numToRange(n);
+  }
+  return out;
+}
+
 /**
  * Plan-chat uses delta output (_keep for unchanged days), so token needs
  * are lower than generate. But worst-case the AI rewrites everything.
@@ -246,14 +280,18 @@ export async function POST(request: NextRequest) {
       fallbackUsed,
       updatedPlan: {
         planName: updatedPlan.planName || activePlan.planName,
-        planDescription: updatedPlan.planDescription || activePlan.planDescription || '',
+        planDescription: '',
         transport_detail: transportFixed.transport_detail,
         itinerary: itineraryNorm,
         attractions: ensureAttractions(updatedPlan.attractions || activePlan.attractions || [], itineraryNorm),
         accommodations: updatedPlan.accommodations || activePlan.accommodations || [],
         food_spots: updatedPlan.foodSpots || activePlan.food_spots || [],
-        cost_breakdown: useAiCost ? aiCost : (activePlan.cost_breakdown || {}),
-        estimated_total: useAiCost ? aiTotal : (activePlan.estimated_total || 0),
+        cost_breakdown: normalizeCostToRange(useAiCost ? aiCost : (activePlan.cost_breakdown || {})),
+        estimated_total: (() => {
+          const raw = useAiCost ? aiCost : (activePlan.cost_breakdown || {});
+          const normalized = normalizeCostToRange(raw);
+          return normalized.total || '0';
+        })(),
         tips: normalizeTips(updatedPlan.tips || activePlan.tips || []),
       },
     };

@@ -138,6 +138,8 @@ export default function PlanResultDirect({
   const [exportingImage, setExportingImage] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [exportError, setExportError] = useState('');
+  const [sharing, setSharing] = useState(false);
+  const [shareMsg, setShareMsg] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
   const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
 
@@ -153,15 +155,23 @@ export default function PlanResultDirect({
   const isFixedDates = trip.date_mode === 'fixed' && !!(trip.start_date && trip.end_date);
 
   const effectiveDestinations = useMemo(() => {
+    const fallback = trip.destinations || [];
     const td = activePlan?.transport_detail;
-    if (!td) return trip.destinations || [];
+    if (!td) return fallback;
     const stops = parseOrderedStopsFromRouteText(td);
     const dep = (trip.departure || '').replace(/\s+/g, '').toLowerCase();
     const filtered = stops.filter((s) => {
       const sk = s.replace(/\s+/g, '').toLowerCase();
       return sk !== dep && !sk.includes(dep) && !dep.includes(sk);
     });
-    return filtered.length > 0 ? filtered : (trip.destinations || []);
+    if (filtered.length === 0) return fallback;
+    const norm = (x: string) => x.replace(/[市省区县]+$/g, '').replace(/\s+/g, '').toLowerCase();
+    const origKeys = fallback.map(norm);
+    const hasOverlap = filtered.some((f) => {
+      const fk = norm(f);
+      return origKeys.some((ok) => fk.includes(ok) || ok.includes(fk));
+    });
+    return hasOverlap ? filtered : fallback;
   }, [activePlan?.transport_detail, trip.departure, trip.destinations]);
 
   useEffect(() => {
@@ -372,6 +382,32 @@ export default function PlanResultDirect({
     }
   }
 
+  async function handleShare() {
+    if (sharing) return;
+    setSharing(true);
+    setShareMsg('');
+    try {
+      const res = await fetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ trip, plans: localPlans, recommendations, hotelWebSearchUsed }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.id) {
+        setShareMsg('分享失败，请重试');
+        return;
+      }
+      const url = `${window.location.origin}/share/${json.id}`;
+      await navigator.clipboard.writeText(url);
+      setShareMsg('链接已复制');
+      setTimeout(() => setShareMsg(''), 3000);
+    } catch {
+      setShareMsg('分享失败');
+    } finally {
+      setSharing(false);
+    }
+  }
+
   async function handleChatSubmit() {
     const message = chatInput.trim();
     if (!message || !activePlanRef.current) return;
@@ -436,6 +472,15 @@ export default function PlanResultDirect({
           </div>
         )}
         <div className="flex flex-wrap items-center justify-end gap-2">
+        {onRegenerate && (
+          <button
+            onClick={onRegenerate}
+            disabled={regenerating}
+            className="px-3 py-2 rounded-lg border border-orange-200 bg-orange-50 text-sm font-medium text-orange-700 hover:bg-orange-100 transition disabled:opacity-50"
+          >
+            {regenerating ? '生成中…' : '🔄 重新生成'}
+          </button>
+        )}
         <button
           onClick={() => { if (isLoggedIn === false) { setShowRegisterPrompt(true); return; } handleExportDoc(); }}
           className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50"
@@ -455,6 +500,13 @@ export default function PlanResultDirect({
           className="px-3 py-2 rounded-lg bg-gray-900 text-white text-sm hover:bg-black disabled:opacity-50"
         >
           {exportingImage ? '导出中...' : '导出图片'}
+        </button>
+        <button
+          onClick={handleShare}
+          disabled={sharing}
+          className="px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-sm font-medium text-blue-700 hover:bg-blue-100 transition disabled:opacity-50"
+        >
+          {sharing ? '生成链接…' : shareMsg || '🔗 分享'}
         </button>
         </div>
       </div>
@@ -485,7 +537,7 @@ export default function PlanResultDirect({
         <h1 className="text-2xl font-bold text-gray-900">{trip.departure} 出发</h1>
         {trip.destinations && trip.destinations.length > 0 ? (
           <p className="text-sm text-gray-500 mt-2">
-            想去的地方（清单，非顺序）：<span className="text-gray-700">{trip.destinations.join('、')}</span>
+            想去的地方：<span className="text-gray-700">{trip.destinations.join('、')}</span>
           </p>
         ) : (
           <p className="text-sm text-gray-500 mt-2">目的地由 AI 根据你的偏好推荐</p>
@@ -503,14 +555,11 @@ export default function PlanResultDirect({
         (recommendations.days != null || recommendations.season || recommendations.nearbySuggestions) && (
         <div className="bg-gradient-to-r from-orange-50 to-amber-50 rounded-xl border border-orange-100 p-5 mb-6 space-y-4">
           <h3 className="font-semibold text-orange-800 mb-1">🤖 AI 其他建议</h3>
-          {isFixedDates && (
-            <p className="text-xs text-orange-700/90">你已选定出发与返程日期，以下为该时段内的实用提示与顺路玩法，不会建议改期。</p>
-          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {recommendations.days != null && (
               <div>
                 <p className="text-xs text-orange-500 font-medium mb-1">
-                  {isFixedDates ? '行程天数（与您的日期一致）' : '推荐天数'}
+                  行程天数
                 </p>
                 <p className="text-sm text-gray-800">{recommendations.days} 天</p>
               </div>
@@ -518,7 +567,7 @@ export default function PlanResultDirect({
             {recommendations.season && (
               <div className={recommendations.nearbySuggestions ? '' : 'sm:col-span-2'}>
                 <p className="text-xs text-orange-500 font-medium mb-1">
-                  {isFixedDates ? '选定时段出行提示' : '最佳季节 / 时段'}
+                  出行提示
                 </p>
                 <p className="text-sm text-gray-800 leading-relaxed">{recommendations.season}</p>
               </div>
@@ -555,12 +604,7 @@ export default function PlanResultDirect({
         </div>
       )}
 
-      {/* Plan description */}
-      {activePlan?.planDescription && (
-        <div className="bg-gray-50 rounded-lg px-4 py-3 mb-6 text-sm text-gray-600">
-          {activePlan.planDescription}
-        </div>
-      )}
+      {/* Plan description removed — was showing AI-generated filler text */}
 
       <div className="bg-white rounded-xl border border-gray-100 p-4 mb-6">
         <div className="flex items-center justify-between text-sm">
@@ -670,17 +714,6 @@ export default function PlanResultDirect({
         </div>
       )}
 
-      {onRegenerate && (
-        <div className="mt-10 mb-24 flex justify-center">
-          <button
-            onClick={onRegenerate}
-            disabled={regenerating}
-            className="px-6 py-3 text-sm font-medium text-orange-700 bg-orange-50 border border-orange-200 rounded-xl hover:bg-orange-100 transition disabled:opacity-50"
-          >
-            {regenerating ? '生成中…' : '不满意？重新生成一套方案'}
-          </button>
-        </div>
-      )}
       </div>
 
       {activePlan && (

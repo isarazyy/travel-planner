@@ -167,13 +167,18 @@ async function fetchDailyForecast(
   startDate: string,
   endDate: string
 ): Promise<WeatherDayPayload[]> {
+  const maxForecastDate = addDaysStr(todayInChina(), 15);
+  const clippedStart = compareIso(startDate, todayInChina()) < 0 ? todayInChina() : startDate;
+  const clippedEnd = compareIso(endDate, maxForecastDate) > 0 ? maxForecastDate : endDate;
+  if (compareIso(clippedStart, clippedEnd) > 0) return [];
+
   const u = new URL('https://api.open-meteo.com/v1/forecast');
   u.searchParams.set('latitude', String(lat));
   u.searchParams.set('longitude', String(lon));
   u.searchParams.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max');
   u.searchParams.set('timezone', 'Asia/Shanghai');
-  u.searchParams.set('start_date', startDate);
-  u.searchParams.set('end_date', endDate);
+  u.searchParams.set('start_date', clippedStart);
+  u.searchParams.set('end_date', clippedEnd);
   try {
     const res = await fetch(u.toString(), { signal: AbortSignal.timeout(7000) });
     if (!res.ok) return [];

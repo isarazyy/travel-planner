@@ -10,15 +10,31 @@ const COST_ITEMS = [
   { key: 'other', label: '其他', color: 'bg-gray-400' },
 ];
 
-function formatCost(val: number | string | undefined): string {
-  if (val == null) return '¥0';
+function ensureRange(val: number | string | undefined): string {
+  if (val == null) return '0';
   if (typeof val === 'string') {
     const trimmed = val.trim();
-    if (/^\d+-\d+$/.test(trimmed)) return `¥${trimmed}`;
-    if (/^\d+$/.test(trimmed)) return `¥${Number(trimmed).toLocaleString()}`;
-    return trimmed.startsWith('¥') ? trimmed : `¥${trimmed}`;
+    if (/^\d+-\d+$/.test(trimmed)) return trimmed;
+    const n = Number(trimmed.replace(/[^\d.]/g, ''));
+    if (!isNaN(n) && n > 0) {
+      const lo = Math.round(n * 0.85 / 50) * 50;
+      const hi = Math.round(n * 1.15 / 50) * 50;
+      return `${Math.max(0, lo)}-${hi}`;
+    }
+    return trimmed;
   }
-  return `¥${val.toLocaleString()}`;
+  if (val > 0) {
+    const lo = Math.round(val * 0.85 / 50) * 50;
+    const hi = Math.round(val * 1.15 / 50) * 50;
+    return `${Math.max(0, lo)}-${hi}`;
+  }
+  return '0';
+}
+
+function formatCost(val: number | string | undefined): string {
+  const ranged = ensureRange(val);
+  if (ranged === '0') return '¥0';
+  return ranged.startsWith('¥') ? ranged : `¥${ranged}`;
 }
 
 function midpoint(val: number | string | undefined): number {
@@ -31,16 +47,14 @@ function midpoint(val: number | string | undefined): number {
 }
 
 export default function CostBreakdown({ cost, peopleCount }: { cost: CostType; peopleCount: number }) {
-  const totalDisplay = formatCost(cost.total);
-  const totalMid = midpoint(cost.total);
-  const perPerson = peopleCount > 1
-    ? (typeof cost.total === 'string' && /^\d+-\d+$/.test(cost.total.trim())
-      ? (() => {
-          const [lo, hi] = cost.total.trim().split('-').map(Number);
-          return `¥${Math.round(lo / peopleCount)}-${Math.round(hi / peopleCount)}`;
-        })()
-      : `¥${Math.round(totalMid / peopleCount).toLocaleString()}`)
-    : null;
+  const totalRange = ensureRange(cost.total);
+  const totalDisplay = totalRange === '0' ? '¥0' : `¥${totalRange}`;
+  const perPerson = (() => {
+    if (peopleCount <= 1) return null;
+    const m = totalRange.match(/^(\d+)-(\d+)$/);
+    if (m) return `¥${Math.round(Number(m[1]) / peopleCount)}-${Math.round(Number(m[2]) / peopleCount)}`;
+    return null;
+  })();
 
   const mids = COST_ITEMS.map(item => midpoint((cost as any)[item.key]));
   const midTotal = mids.reduce((s, v) => s + v, 0);

@@ -22,6 +22,7 @@ import { getLastQwenUsage } from '@/lib/qwen';
 import { collectRealDataForTrip } from '@/lib/amap-data-collector';
 import { postEnrichTransitData } from '@/lib/post-enrich-transit';
 import { backfillDrivingData } from '@/lib/backfill-driving';
+import { optimizeRoute } from '@/lib/route-optimizer';
 import { createJob, updateJobStatus } from '@/lib/generation-job';
 
 /** 勿用用户输入顺序冒充推荐路线；仅表示「包含这些地点」。 */
@@ -175,12 +176,12 @@ function normalizePlanCosts(p: any) {
 function computeMaxTokens(isFast: boolean, dayCount: number | null): number {
   const days = dayCount != null && dayCount > 0 ? dayCount : 5;
   const planSlots = isFast ? 1 : 2;
-  const perDay = days > 10 ? (isFast ? 280 : 300) : (isFast ? 320 : 350);
-  const base = isFast ? 1800 : 2200;
+  const perDay = days > 10 ? (isFast ? 400 : 450) : (isFast ? 550 : 600);
+  const base = isFast ? 2800 : 3500;
   let raw = base + days * perDay * planSlots;
   if (!isFast && planSlots >= 2) raw = Math.round(raw * 1.05);
-  const cap = isFast ? 10000 : 12000;
-  const floor = isFast ? 3500 : 5500;
+  const cap = isFast ? 16000 : 20000;
+  const floor = isFast ? 5500 : 8000;
   return Math.min(cap, Math.max(floor, raw));
 }
 
@@ -300,7 +301,7 @@ export async function POST(request: NextRequest) {
       itinerary = transportFixed.itinerary;
       return {
         planName: p.planName || (fallbackUsed ? '精简可执行版' : '未命名方案'),
-        planDescription: p.planDescription || (fallbackUsed ? '系统自动降级重试生成' : ''),
+        planDescription: '',
         transport_detail: transportFixed.transport_detail,
         itinerary,
         attractions: ensureAttractions(p.attractions, itinerary),
@@ -379,11 +380,14 @@ export async function POST(request: NextRequest) {
       return maybePersist(built as Record<string, unknown>);
     }
 
-    const [hotelRes, weatherRes, transportFoodRes, realDataRes] = await Promise.allSettled([
+    const [hotelRes, weatherRes, transportFoodRes, realDataRes, routeRes] = await Promise.allSettled([
       buildHotelWebContextForPrompt(formData),
       fetchTripWeatherForPlan(formData),
       buildTransportFoodWebContextForPrompt(formData),
       collectRealDataForTrip(formData),
+      formData.destinationMode === 'specific' && formData.destinations?.length >= 2
+        ? optimizeRoute(formData.departure, formData.destinations)
+        : Promise.resolve(null),
     ]);
 
     const hotelWebContext = hotelRes.status === 'fulfilled' ? hotelRes.value.contextText : '';
@@ -391,11 +395,12 @@ export async function POST(request: NextRequest) {
     const transportFoodContext = transportFoodRes.status === 'fulfilled' ? transportFoodRes.value.contextText : '';
     const transportFoodWebSearchUsed = transportFoodRes.status === 'fulfilled' ? transportFoodRes.value.used : false;
     const realDataContext = realDataRes.status === 'fulfilled' ? realDataRes.value.promptText : '';
+    const optimizedRoute = routeRes.status === 'fulfilled' ? routeRes.value : null;
     const { promptText: weatherContext, payload: weatherPayload } =
       weatherRes.status === 'fulfilled' ? weatherRes.value : emptyWeather;
 
     let prompt = buildMultiPlanPrompt(formData, {
-      hotelWebContext, weatherContext, transportFoodContext, realDataContext,
+      hotelWebContext, weatherContext, transportFoodContext, realDataContext, optimizedRoute: optimizedRoute ?? undefined,
     });
     if (isRegenerate) {
       prompt += '\n\n【重新生成要求】用户对上一次方案不满意，请给出完全不同的方案：换不同的景点组合、不同的游玩路线顺序、不同的餐厅和住宿推荐。不要重复上次的内容。';
