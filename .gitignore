@@ -42,4 +42,8 @@ next-env.d.ts
 
 # Local Netlify folder
 .netlify
-.github/
+
+# Ignore local .github noise but keep the deploy workflow tracked
+.github/*
+!.github/workflows/
+!.github/workflows/**
