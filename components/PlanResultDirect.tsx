@@ -735,7 +735,7 @@ export default function PlanResultDirect({
                   与 AI 调整方案
                 </span>
                 <span className="text-xs text-gray-500 shrink-0 tabular-nums">
-                  {chatExpanded ? '收起对话 ↑' : '展开对话 ↓'}
+                  {chatExpanded ? '收起对话 ↓' : '展开对话 ↑'}
                 </span>
               </button>
 

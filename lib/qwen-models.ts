@@ -14,5 +14,5 @@ export function resolveGenerateModel(isFast: boolean): string {
 }
 
 export function resolvePlanChatModel(): string {
-  return process.env.QWEN_MODEL_CHAT?.trim() || 'qwen-turbo';
+  return process.env.QWEN_MODEL_CHAT?.trim() || 'qwen-plus';
 }

@@ -13,7 +13,7 @@ export function getLastQwenUsage(): QwenUsage | null {
 
 export async function callQwen(
   prompt: string,
-  options?: { maxTokens?: number; temperature?: number; timeoutMs?: number; model?: string; enableSearch?: boolean }
+  options?: { maxTokens?: number; temperature?: number; timeoutMs?: number; model?: string; enableSearch?: boolean; systemMessage?: string }
 ): Promise<string> {
   const apiKey = process.env.DASHSCOPE_API_KEY;
   if (!apiKey) throw new Error('DASHSCOPE_API_KEY not configured');
@@ -35,7 +35,7 @@ export async function callQwen(
         messages: [
           {
             role: 'system',
-            content: '你是一个专业的旅行规划师。你必须严格按照用户要求的JSON格式返回结果，不要添加任何额外的文字说明、markdown标记或代码块标记。只返回纯JSON。',
+            content: options?.systemMessage || '你是一个专业的旅行规划师。你必须严格按照用户要求的JSON格式返回结果，不要添加任何额外的文字说明、markdown标记或代码块标记。只返回纯JSON。',
           },
           { role: 'user', content: prompt },
         ],

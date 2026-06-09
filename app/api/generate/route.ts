@@ -12,6 +12,9 @@ import {
   ensureItineraryMatchesDates,
   normalizeItinerary,
   normalizeTips,
+  filterMustAvoidActivities,
+  fixPrematureReturn,
+  filterChainFoodAndDedupe,
 } from '@/lib/normalize-plan';
 import { sanitizeTransportPlan } from '@/lib/transport-sanity';
 import { streamWithKeepAlive, sseHeaders } from '@/lib/stream-response';
@@ -312,6 +315,24 @@ export async function POST(request: NextRequest) {
         tips: normalizeTips(p.tips),
       };
     });
+    const mustAvoid = formData.preferences?.mustAvoid;
+    if (mustAvoid) {
+      const removedCount = filterMustAvoidActivities(plans, mustAvoid);
+      if (removedCount > 0) {
+        console.log(`[generate] filterMustAvoid: removed ${removedCount} activities matching "${mustAvoid}"`);
+      }
+    }
+
+    const returnFixed = fixPrematureReturn(plans, formData.departure);
+    if (returnFixed > 0) {
+      console.log(`[generate] fixPrematureReturn: fixed ${returnFixed} plan(s) with premature return`);
+    }
+
+    const { chainRemoved, dedupedCount } = filterChainFoodAndDedupe(plans);
+    if (chainRemoved > 0 || dedupedCount > 0) {
+      console.log(`[generate] food cleanup: stripped ${chainRemoved} chain, deduped ${dedupedCount} repeats`);
+    }
+
     const routeRaw = parsed.recommendedRoute || fallbackRecommendedRoute(formData.destinations);
     return {
       hotelWebSearchUsed,

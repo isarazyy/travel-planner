@@ -90,6 +90,7 @@ function PlanContent() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<any>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartRef = useRef<number>(0);
 
   // Quick mode fields
   const [quickDeparture, setQuickDeparture] = useState('');
@@ -106,8 +107,17 @@ function PlanContent() {
     stopPolling();
     setLoading(true);
     localStorage.setItem('gen_job_id', jobId);
+    pollStartRef.current = Date.now();
 
     pollRef.current = setInterval(async () => {
+      const elapsed = Date.now() - pollStartRef.current;
+      if (elapsed > 180_000) {
+        stopPolling();
+        localStorage.removeItem('gen_job_id');
+        setError('生成超时，请重试');
+        setLoading(false);
+        return;
+      }
       try {
         const r = await fetch(`/api/job/status?id=${jobId}`);
         const j = await r.json();
@@ -493,7 +503,19 @@ function PlanContent() {
               {loading && localStorage.getItem('gen_job_id') && (
                 <div className="mt-4 bg-blue-50 text-blue-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
                   <svg className="animate-spin h-4 w-4 shrink-0" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                  <span>方案正在后台生成，你可以随意浏览其他页面，生成完成后会自动显示结果</span>
+                  <span className="flex-1">方案正在后台生成，你可以随意浏览其他页面，生成完成后会自动显示结果</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopPolling();
+                      localStorage.removeItem('gen_job_id');
+                      setLoading(false);
+                      setError('');
+                    }}
+                    className="shrink-0 ml-2 px-3 py-1 text-xs font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition"
+                  >
+                    取消生成
+                  </button>
                 </div>
               )}
 

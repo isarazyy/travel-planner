@@ -159,7 +159,16 @@ export async function saveGeneratedTrip(
     accommodations: p.accommodations ?? [],
     food_spots: p.food_spots ?? [],
     cost_breakdown: p.cost_breakdown ?? {},
-    estimated_total: typeof p.estimated_total === 'string' && /\d+-\d+/.test(p.estimated_total) ? p.estimated_total : Math.round(Number(p.estimated_total) || 0),
+    estimated_total: (() => {
+      const raw = p.estimated_total;
+      if (typeof raw === 'string') {
+        const rangeMatch = raw.match(/^(\d+)-(\d+)$/);
+        if (rangeMatch) return Math.round((Number(rangeMatch[1]) + Number(rangeMatch[2])) / 2);
+        const n = Number(raw.replace(/[^\d.]/g, ''));
+        return Number.isFinite(n) ? Math.round(n) : 0;
+      }
+      return Math.round(Number(raw) || 0);
+    })(),
     tips: Array.isArray(p.tips) ? p.tips : [],
   }));
 

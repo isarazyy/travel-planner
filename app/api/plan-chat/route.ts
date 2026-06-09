@@ -7,6 +7,9 @@ import {
   ensureItineraryMatchesDates,
   normalizeItinerary,
   normalizeTips,
+  filterMustAvoidActivities,
+  inferMustAvoidFromChatMessage,
+  filterChainFoodAndDedupe,
 } from '@/lib/normalize-plan';
 import { sanitizeTransportPlan } from '@/lib/transport-sanity';
 import { streamWithKeepAlive, sseHeaders } from '@/lib/stream-response';
@@ -148,9 +151,10 @@ export async function POST(request: NextRequest) {
       const raw = await callQwen(prompt, {
         model: resolvePlanChatModel(),
         maxTokens: calcEditMaxTokens(dayCount),
-        temperature: 0.3,
+        temperature: 0.5,
         timeoutMs: calcEditTimeoutMs(dayCount),
         enableSearch: true,
+        systemMessage: '你是一位经验丰富、见多识广的旅行规划师，也是用户的朋友。用户正在和你讨论一份旅行方案。纯聊天时像朋友一样自然回答，结合用户的具体行程信息（目的地、日期、天气等）给出有针对性的建议，不要泛泛而谈。需要修改方案时严格返回JSON。不要重复之前说过的话。',
       });
       if (process.env.NODE_ENV === 'development') {
         console.log('[plan-chat] AI原始返回(前500字):', raw.slice(0, 500));
@@ -269,6 +273,30 @@ export async function POST(request: NextRequest) {
       itinerary: itineraryNorm,
     });
     itineraryNorm = transportFixed.itinerary;
+
+    const hist = Array.isArray(history) ? history : [];
+    const recentUserText = hist
+      .filter((h: { role?: string }) => h?.role === 'user')
+      .slice(-5)
+      .map((h: { content?: string }) => String(h?.content || ''))
+      .join('\n');
+    const chatAvoid = inferMustAvoidFromChatMessage(`${recentUserText}\n${String(message)}`.trim());
+    const mustAvoidCombined = [trip?.preferences?.mustAvoid, chatAvoid].filter(Boolean).join('；');
+    const planWrapper = [{
+      itinerary: itineraryNorm,
+      attractions: updatedPlan.attractions || activePlan.attractions || [],
+      food_spots: updatedPlan.food_spots || activePlan.food_spots || [],
+    }];
+    if (mustAvoidCombined) {
+      const removed = filterMustAvoidActivities(planWrapper, mustAvoidCombined);
+      if (removed > 0 && process.env.NODE_ENV === 'development') {
+        console.log(`[plan-chat] filterMustAvoid: removed ${removed} items, signals: ${mustAvoidCombined}`);
+      }
+    }
+    const foodCleanup = filterChainFoodAndDedupe(planWrapper);
+    if (foodCleanup.chainRemoved > 0 || foodCleanup.dedupedCount > 0) {
+      console.log(`[plan-chat] food cleanup: stripped ${foodCleanup.chainRemoved} chain, deduped ${foodCleanup.dedupedCount} repeats`);
+    }
 
     if (process.env.NODE_ENV === 'development') {
       console.log('[plan-chat] 最终itinerary每天主题:', itineraryNorm.map((d: any) => `D${d.day}:${d.theme}`).join(' | '));

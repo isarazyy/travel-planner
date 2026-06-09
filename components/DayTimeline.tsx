@@ -5,6 +5,7 @@ import { sanitizePlanString } from '@/lib/normalize-plan';
 import type { TripWeatherPayload } from '@/lib/weather';
 import { getDressAndUmbrellaAdvice } from '@/lib/weather-advice';
 import { buildAmapNavUrl, buildDianpingUrl, buildMeituanUrl, buildMeituanHotelUrl, buildCtripHotelUrl } from '@/lib/amap-uri';
+import { buildCtripFlightUrl, buildQunarFlightUrl } from '@/lib/flight-url';
 
 export default function DayTimeline({
   day,
@@ -154,14 +155,32 @@ export default function DayTimeline({
                       {transportIcon} 交通信息：{transportBits.join(' · ')}
                     </p>
                     {isFlight ? (
-                      <a
-                        href="https://flights.ctrip.com/"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md transition whitespace-nowrap"
-                      >
-                        🔍 查航班比价
-                      </a>
+                      <>
+                        <a
+                          href={buildCtripFlightUrl(
+                            act.transportInfo?.fromStation || '',
+                            act.transportInfo?.toStation || '',
+                            dateIso,
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md transition whitespace-nowrap"
+                        >
+                          ✈️ 携程查航班
+                        </a>
+                        <a
+                          href={buildQunarFlightUrl(
+                            act.transportInfo?.fromStation || '',
+                            act.transportInfo?.toStation || '',
+                            dateIso,
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-green-700 bg-green-50 hover:bg-green-100 px-2 py-0.5 rounded-md transition whitespace-nowrap"
+                        >
+                          🔍 去哪儿
+                        </a>
+                      </>
                     ) : !isDrive ? (
                       <a
                         href="https://www.12306.cn/"
