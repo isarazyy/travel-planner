@@ -737,7 +737,7 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
         {
           "day": 1,
           "date": "${jsonDateFieldExample}",
-          "theme": "抵达青岛·海滨初探（长途转场日=只排轻活动的示范）",
+          "theme": "抵达青岛·海滨初探",
           "activities": [
             {"time": "08:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约6.5小时", "cost": 0, "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约6.5小时（按高速实际通行估算，含休息与拥堵）", "priceNote": "油费+过路费约600元"}},
             {"time": "12:00", "activity": "途中午餐", "location": "沿途服务区/城镇", "duration": "约1小时", "cost": 80, "foodRecommendation": {"shopName": "服务区当地小吃", "rating": 4.0, "specialty": "快餐"}},
