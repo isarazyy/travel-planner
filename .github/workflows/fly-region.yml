@@ -1,0 +1,61 @@
+# 手动触发：把生产机器搬迁到离用户更近的区域（默认东京 nrt）。
+# 流程：先把不在目标区的机器克隆到目标区，确认新机器在运行，再销毁旧机器。
+name: Fly Relocate
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_region:
+        description: '目标区域代码（nrt=东京, hkg=香港, sin=新加坡）'
+        required: true
+        default: 'nrt'
+
+jobs:
+  relocate:
+    name: Relocate machines
+    runs-on: ubuntu-latest
+    concurrency: deploy-group
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - name: Relocate
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          APP: travel-planner-zy
+          TARGET: ${{ github.event.inputs.target_region }}
+        run: |
+          set -euo pipefail
+          echo "=== 目标区域: $TARGET ==="
+          echo "=== 当前机器 ==="
+          flyctl machines list -a "$APP"
+
+          OLD_IDS=$(flyctl machines list -a "$APP" --json | jq -r ".[] | select(.region != \"$TARGET\") | .id")
+          if [ -z "$OLD_IDS" ]; then
+            echo "没有需要搬迁的机器（已全部在 $TARGET）。"
+            exit 0
+          fi
+
+          for id in $OLD_IDS; do
+            echo "=== 克隆 $id 到 $TARGET ==="
+            flyctl machine clone "$id" --region "$TARGET" -a "$APP"
+          done
+
+          echo "=== 克隆后机器列表 ==="
+          flyctl machines list -a "$APP"
+
+          # 等新机器进入 started 状态
+          echo "=== 等待目标区机器就绪 ==="
+          for i in $(seq 1 20); do
+            STARTED=$(flyctl machines list -a "$APP" --json | jq -r "[.[] | select(.region == \"$TARGET\" and .state == \"started\")] | length")
+            echo "目标区已启动机器数: $STARTED"
+            if [ "$STARTED" -ge 1 ]; then break; fi
+            sleep 6
+          done
+
+          for id in $OLD_IDS; do
+            echo "=== 销毁旧机器 $id ==="
+            flyctl machine destroy "$id" --force -a "$APP"
+          done
+
+          echo "=== 搬迁完成，最终机器列表 ==="
+          flyctl machines list -a "$APP"
