@@ -180,16 +180,16 @@ export function buildMultiPlanPrompt(
     ? `\n自驾游模式额外要求（非常重要 — 自驾的核心体验是"在路上"）：
 
 【路线规划】
-- transportDetail 必须写清楚：全程预估总里程和总驾车时长；每日驾车路段（A→B，约X公里，约X小时）；推荐走的高速/国道名称（如G2京沪高速、318国道等）；高速费预估
+- transportDetail 必须写清楚：全程预估总里程和总驾车时长；每日驾车路段（A→B，约X公里，约X小时）；推荐走的高速/国道名称（如G2京沪高速、318国道等，**拿不准就别写编号**）；油费+过路费**粗略区间并注明「以实际为准」**。**不要逐一编造途经城市**——只有非常确定在主干道上的枢纽才可提（如北京↔青岛经济南），不确定就写「具体途经与路况以导航实时为准」，严禁把不在路线上的城市写成途经地。
 - itinerary 里每天如果有驾车路段，activities 须含一条"当日驾车转场"条目（如"自驾前往XX"），duration 写驾车耗时
 - **自驾转场活动必须带 transportInfo**，且 **distance 字段不可省略**：
   · fromStation: 出发城市
   · toStation: 目的城市
   · distance: "约X公里"（必填！用户需要知道开多远）
   · duration: "约X小时"
-  · priceNote: "油费及过路费预估X元"
-  · 错误示例（缺少distance）：{"fromStation":"北京","toStation":"青岛","duration":"约5小时","priceNote":"油费600元"} ← 不合格
-  · 正确示例：{"fromStation":"北京","toStation":"青岛","distance":"约630公里","duration":"约5小时","priceNote":"油费及过路费预估600元"} ← 合格
+  · priceNote: "油费+过路费约X-Y元，以实际为准"（**写区间，不要精确到个位**）
+  · 错误示例（缺少distance / 精确路费）：{"fromStation":"北京","toStation":"青岛","duration":"约5小时","priceNote":"油费600元"} ← 不合格
+  · 正确示例：{"fromStation":"北京","toStation":"青岛","distance":"约630公里","duration":"约6.5小时","priceNote":"油费+过路费约500-700元，以实际为准"} ← 合格
 
 【沿途体验 — 自驾游最重要的部分】
 - 自驾的精髓在于沿途风光，而不仅仅是赶到目的地。每段超过2小时的驾车路段，**必须**在 notes 里写明：
@@ -743,7 +743,7 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
           "date": "${jsonDateFieldExample}",
           "theme": "抵达青岛·海滨初探",
           "activities": [
-            {"time": "08:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约6.5小时", "cost": 0, "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约6.5小时（按高速实际通行估算，含休息与拥堵）", "priceNote": "油费+过路费约600元"}},
+            {"time": "08:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约6.5小时", "cost": 0, "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约6.5小时（按高速实际通行估算，含休息与拥堵）", "priceNote": "油费+过路费约500-700元，以实际为准"}},
             {"time": "12:00", "activity": "途中午餐", "location": "沿途服务区/城镇", "duration": "约1小时", "cost": 80, "foodRecommendation": {"shopName": "服务区当地小吃", "rating": 4.0, "specialty": "快餐"}},
             {"time": "15:30", "activity": "抵达青岛、入住酒店稍作休整", "location": "五四广场附近", "duration": "约1小时", "cost": 0, "stayInfo": {"hotelName": "全季青岛五四广场店", "pricePerNight": 400}},
             {"time": "17:00", "activity": "栈桥与海滨步道散步", "location": "青岛栈桥", "duration": "约1.5小时", "cost": 0, "notes": "长途开了一天，抵达当天只排1个就近轻活动，不再塞夜游"},
@@ -771,7 +771,7 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
           "activities": [
             {"time": "08:00", "activity": "酒店早餐", "location": "酒店", "duration": "约0.5小时", "cost": 0},
             {"time": "08:30", "activity": "退房、海边最后散步", "location": "栈桥海滨", "duration": "约1小时", "cost": 0, "notes": "返程前安排1项真实就近活动，而不是空写'整理行李'"},
-            {"time": "10:00", "activity": "自驾返回北京", "location": "青岛→北京", "duration": "约6.5小时", "cost": 0, "transportInfo": {"fromStation": "青岛", "toStation": "北京", "distance": "约630公里", "duration": "约6.5小时", "priceNote": "油费+过路费约600元"}},
+            {"time": "10:00", "activity": "自驾返回北京", "location": "青岛→北京", "duration": "约6.5小时", "cost": 0, "transportInfo": {"fromStation": "青岛", "toStation": "北京", "distance": "约630公里", "duration": "约6.5小时", "priceNote": "油费+过路费约500-700元，以实际为准"}},
             {"time": "13:00", "activity": "途中午餐", "location": "沿途服务区", "duration": "约1小时", "cost": 80}
           ]
         }
