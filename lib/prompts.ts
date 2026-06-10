@@ -736,7 +736,7 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
     {
       "planName": "方案名称（如：5天经济慢游版）",
       "planDescription": "一句话说明这个方案的特点和适合人群",
-      "transportDetail": "具体交通方案说明",
+      "transportDetail": "交通方案说明。自驾示例：全程约X公里、单程约X小时；沿途具体途经城市与路况以高德/百度导航实时为准（不要在这里罗列途经城市）；油费+过路费约X-Y元，以实际为准。",
       "itinerary": [
         {
           "day": 1,

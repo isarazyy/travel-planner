@@ -156,7 +156,15 @@ export async function backfillDrivingData(result: Record<string, unknown>) {
               [0],
             );
             const route = results[0]?.routes[0];
-            if (route && route.distance >= 3000) {
+            // 合理性兜底：地理编码偶尔把同名地名定位到别的省，返回离谱里程（如"宏村"被定到外省 → 2652km）。
+            // 用 AI 给出的时长做基准：若高德时长远超 AI 预估（>2.5倍且差距>2h），判定为编码错配，丢弃不回填。
+            const aiHours = parseHours(act.duration || ti.duration);
+            const amapHours = route ? route.duration / 3600 : 0;
+            const absurd =
+              !!route &&
+              (route.distance > 2000_000 ||
+                (aiHours > 0 && amapHours > aiHours * 2.5 && amapHours - aiHours > 2));
+            if (route && route.distance >= 3000 && !absurd) {
               const km = Math.round(route.distance / 1000);
               const hours = Math.floor(route.duration / 3600);
               const mins = Math.floor((route.duration % 3600) / 60);
