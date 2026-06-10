@@ -4,17 +4,31 @@ import { DayPlan } from '@/lib/types';
 import { sanitizePlanString } from '@/lib/normalize-plan';
 import type { TripWeatherPayload } from '@/lib/weather';
 import { getDressAndUmbrellaAdvice } from '@/lib/weather-advice';
-import { buildAmapNavUrl, buildDianpingUrl, buildMeituanUrl, buildMeituanHotelUrl, buildCtripHotelUrl } from '@/lib/amap-uri';
+import { buildAmapNavUrl, buildDianpingUrl, buildMeituanUrl, buildMeituanHotelUrl, buildCtripHotelUrl, buildCtripTicketUrl } from '@/lib/amap-uri';
 import { buildCtripFlightUrl, buildQunarFlightUrl } from '@/lib/flight-url';
 
 export default function DayTimeline({
   day,
   tripWeather,
   transportModes,
+  editing = false,
+  isFirstDay = false,
+  isLastDay = false,
+  onDeleteActivity,
+  onMoveActivity,
+  onDeleteDay,
+  onMoveDay,
 }: {
   day: DayPlan;
   tripWeather?: TripWeatherPayload | null;
   transportModes?: string[];
+  editing?: boolean;
+  isFirstDay?: boolean;
+  isLastDay?: boolean;
+  onDeleteActivity?: (actIdx: number) => void;
+  onMoveActivity?: (actIdx: number, dir: -1 | 1) => void;
+  onDeleteDay?: () => void;
+  onMoveDay?: (dir: -1 | 1) => void;
 }) {
   type WeatherDay = { date: string; condition: string; tempMin: number; tempMax: number; precipProb: number };
   type WeatherRow = { label: string; weather: WeatherDay };
@@ -82,6 +96,38 @@ export default function DayTimeline({
             </>
           )}
         </div>
+        {editing && (
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={() => onMoveDay?.(-1)}
+              disabled={isFirstDay}
+              title="这天上移"
+              className="w-7 h-7 rounded-md border border-gray-200 bg-white text-gray-600 text-xs hover:bg-gray-50 disabled:opacity-30"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              onClick={() => onMoveDay?.(1)}
+              disabled={isLastDay}
+              title="这天下移"
+              className="w-7 h-7 rounded-md border border-gray-200 bg-white text-gray-600 text-xs hover:bg-gray-50 disabled:opacity-30"
+            >
+              ↓
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`确定删除第 ${day.day} 天的全部安排吗？`)) onDeleteDay?.();
+              }}
+              title="删除这一天"
+              className="w-7 h-7 rounded-md border border-red-200 bg-red-50 text-red-500 text-xs hover:bg-red-100"
+            >
+              ✕
+            </button>
+          </div>
+        )}
       </div>
 
       {activities.length === 0 ? (
@@ -128,6 +174,36 @@ export default function DayTimeline({
                   <span className="text-sm font-medium text-gray-900">
                     {sanitizePlanString(act.activity, '活动待补充')}
                   </span>
+                  {editing && (
+                    <span className="ml-auto flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => onMoveActivity?.(i, -1)}
+                        disabled={i === 0}
+                        title="上移"
+                        className="w-6 h-6 rounded border border-gray-200 bg-white text-gray-500 text-[11px] hover:bg-gray-50 disabled:opacity-30"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onMoveActivity?.(i, 1)}
+                        disabled={i === lastIdx}
+                        title="下移"
+                        className="w-6 h-6 rounded border border-gray-200 bg-white text-gray-500 text-[11px] hover:bg-gray-50 disabled:opacity-30"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDeleteActivity?.(i)}
+                        title="删除这条"
+                        className="w-6 h-6 rounded border border-red-200 bg-red-50 text-red-500 text-[11px] hover:bg-red-100"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-500 leading-[1.65]">
                   <span>📍 {sanitizePlanString(act.location, '地点待补充')}</span>
@@ -139,6 +215,16 @@ export default function DayTimeline({
                       className="inline-flex items-center gap-0.5 text-[11px] text-blue-600 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition whitespace-nowrap"
                     >
                       导航
+                    </a>
+                  )}
+                  {act.cost > 0 && !hasTransportInfo && !hasStayInfo && !hasFoodInfo && act.location && act.location !== '地点待补充' && (
+                    <a
+                      href={buildCtripTicketUrl(act.activity || act.location, dayCityHint)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-0.5 text-[11px] text-orange-600 bg-orange-50 hover:bg-orange-100 px-1.5 py-0.5 rounded transition whitespace-nowrap"
+                    >
+                      🎫 订门票
                     </a>
                   )}
                   <span className="inline-block pb-0.5">

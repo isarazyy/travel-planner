@@ -1,10 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import {
   TRANSPORT_OPTIONS,
   COMPANION_OPTIONS,
   CHILD_AGE_OPTIONS,
   PACE_OPTIONS,
+  TRIP_PRESETS,
+  type TripPreset,
 } from '@/lib/types';
 
 export default function StepTravelStyle({
@@ -17,9 +20,20 @@ export default function StepTravelStyle({
   const prefs = data.preferences ?? {};
   const transportSelected = prefs.transportModes ?? [];
   const isMotorcycle = transportSelected.includes('motorcycle');
+  const [activePreset, setActivePreset] = useState<string | null>(null);
 
   function patch(updates: Record<string, unknown>) {
+    setActivePreset(null);
     onChange({ ...data, preferences: { ...prefs, ...updates } });
+  }
+
+  function applyPreset(p: TripPreset) {
+    setActivePreset(p.id);
+    onChange({
+      ...data,
+      ...(p.peopleCount ? { peopleCount: p.peopleCount } : {}),
+      preferences: { ...prefs, ...p.prefs },
+    });
   }
 
   function toggleTransport(value: string) {
@@ -32,6 +46,7 @@ export default function StepTravelStyle({
   }
 
   function setCompanion(value: string) {
+    setActivePreset(null);
     const updates: Record<string, unknown> = { companion: value };
     if (value !== 'family') updates.childAge = undefined;
     const autoCounts: Record<string, number> = { solo: 1, couple: 2 };
@@ -56,6 +71,36 @@ export default function StepTravelStyle({
 
   return (
     <div className="space-y-8">
+      {/* Quick presets */}
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900">快速预设</h2>
+        <p className="mt-1 mb-3 text-sm text-gray-600">点一下按人群自动填好偏好，之后还能自己微调</p>
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+          {TRIP_PRESETS.map((p) => {
+            const isSel = activePreset === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => applyPreset(p)}
+                className={`flex items-center gap-2.5 rounded-xl border p-3 text-left transition ${
+                  isSel ? cardSel : `${cardUn} bg-white hover:border-gray-300`
+                }`}
+              >
+                <span className="text-xl shrink-0">{p.icon}</span>
+                <span className="min-w-0">
+                  <span className="block font-medium text-gray-900 text-sm truncate">{p.label}</span>
+                  <span className="block text-[11px] text-gray-500 truncate">{p.desc}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        {activePreset && (
+          <p className="mt-2 text-xs text-orange-600">已套用预设，下方偏好可继续修改</p>
+        )}
+      </div>
+
       {/* Transport */}
       <div>
         <h2 className="text-lg font-semibold text-gray-900">出行方式</h2>

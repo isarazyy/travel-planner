@@ -34,6 +34,27 @@ body {
   letter-spacing: normal;
 }
 
+/* 移动端：避免聚焦输入框时 iOS Safari 自动放大页面（字号 <16px 会触发） */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* 移动端：去掉点击高亮灰块、保证可点元素有足够触摸反馈 */
+button,
+a,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
 input[type="date"]::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 0.5;

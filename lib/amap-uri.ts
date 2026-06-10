@@ -49,3 +49,19 @@ export function buildCtripHotelUrl(name: string, city?: string): string {
   const q = city ? `${city} ${name}` : name;
   return `https://m.ctrip.com/webapp/hotel/hotellist?keyword=${encodeURIComponent(q)}`;
 }
+
+/* ---- Attraction ticket booking links ---- */
+
+/** Ctrip H5 门票搜索页（按景点名搜门票） */
+export function buildCtripTicketUrl(name: string, city?: string): string {
+  const base = name.replace(/[（(][^)）]*[)）]/g, '').trim();
+  const q = city && !base.includes(city) ? `${city}${base}` : base;
+  return `https://m.ctrip.com/webapp/ticket/destination?keyword=${encodeURIComponent(q)}`;
+}
+
+/** 美团门票（走 app-link，唤起 App 失败时回退到美团网页搜索“XX 门票”） */
+export function buildMeituanTicketUrl(name: string, city?: string): string {
+  const base = name.replace(/[（(][^)）]*[)）]/g, '').trim();
+  const kw = `${city && !base.includes(city) ? city : ''}${base}门票`.trim();
+  return `/api/app-link?app=meituan&q=${encodeURIComponent(kw)}`;
+}

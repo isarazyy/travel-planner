@@ -453,6 +453,9 @@ export function ensureAttractions(
           category: sanitizePlanString(a?.category, '景点/体验'),
           duration: sanitizePlanString(a?.duration, '约1-2小时'),
           cost: activityCost(a?.cost),
+          highlight: sanitizePlanString(a?.highlight, '') || undefined,
+          suitableFor: sanitizePlanString(a?.suitableFor, '') || undefined,
+          bestTime: sanitizePlanString(a?.bestTime, '') || undefined,
         }))
         .filter((a) => !!a.name)
     : [];

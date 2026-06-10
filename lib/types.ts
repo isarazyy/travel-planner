@@ -113,6 +113,12 @@ export interface Attraction {
   category: string;
   duration: string;
   cost: number;
+  /** 一句话亮点：最值得体验/最出片的点 */
+  highlight?: string;
+  /** 适合人群，如 亲子/情侣/摄影/带老人 */
+  suitableFor?: string;
+  /** 建议游玩时段，如 上午人少/傍晚看日落 */
+  bestTime?: string;
   rating?: number;
   /** 高德回填：实景图片 */
   image?: string;
@@ -281,6 +287,122 @@ export const WAKE_OPTIONS = [
   { value: 'early', label: '早鸟 (8:00出发)', icon: '🌅' },
   { value: 'normal', label: '正常 (10:00出发)', icon: '☀️' },
   { value: 'late', label: '晚起 (11:00后出发)', icon: '😴' },
+];
+
+/** 人群一键预设：点一下自动填好同行人/节奏/兴趣/预算/住宿等偏好 */
+export interface TripPreset {
+  id: string;
+  label: string;
+  icon: string;
+  desc: string;
+  peopleCount?: number;
+  prefs: Partial<TripPreferences>;
+}
+
+export const TRIP_PRESETS: TripPreset[] = [
+  {
+    id: 'family_kids',
+    label: '带娃遛娃',
+    icon: '👨‍👩‍👧',
+    desc: '节奏轻松 · 亲子友好',
+    peopleCount: 3,
+    prefs: {
+      companion: 'family',
+      pace: 'relaxed',
+      interests: ['kids', 'nature', 'food'],
+      wakeUpTime: 'normal',
+      accommodation: 'comfort_hotel',
+      budgetLevel: 'comfort',
+      budgetRange: [400, 800],
+      foodPrefs: ['local_must', 'restaurant'],
+    },
+  },
+  {
+    id: 'couple',
+    label: '情侣浪漫',
+    icon: '💑',
+    desc: '出片 · 美食 · 微醺',
+    peopleCount: 2,
+    prefs: {
+      companion: 'couple',
+      pace: 'balanced',
+      interests: ['photo', 'food', 'artsy', 'nightlife'],
+      wakeUpTime: 'late',
+      accommodation: 'boutique_bnb',
+      accommodationStyles: ['designer', 'scenic_view'],
+      budgetLevel: 'comfort',
+      budgetRange: [400, 800],
+      foodPrefs: ['local_must'],
+    },
+  },
+  {
+    id: 'elderly',
+    label: '带爸妈/老人',
+    icon: '👴',
+    desc: '慢节奏 · 少折腾',
+    peopleCount: 2,
+    prefs: {
+      companion: 'elderly',
+      pace: 'relaxed',
+      interests: ['nature', 'history', 'local'],
+      wakeUpTime: 'normal',
+      accommodation: 'comfort_hotel',
+      budgetLevel: 'comfort',
+      budgetRange: [400, 800],
+      foodPrefs: ['local_must', 'restaurant'],
+    },
+  },
+  {
+    id: 'friends',
+    label: '朋友嗨玩',
+    icon: '👫',
+    desc: '玩得满 · 有夜生活',
+    peopleCount: 4,
+    prefs: {
+      companion: 'friends',
+      pace: 'intensive',
+      interests: ['food', 'nightlife', 'photo', 'outdoor'],
+      wakeUpTime: 'normal',
+      accommodation: 'comfort_hotel',
+      budgetLevel: 'economy',
+      budgetRange: [200, 400],
+      foodPrefs: ['local_must', 'street'],
+    },
+  },
+  {
+    id: 'backpacker',
+    label: '穷游党',
+    icon: '🎒',
+    desc: '省钱 · 多走多看',
+    peopleCount: 1,
+    prefs: {
+      companion: 'solo',
+      pace: 'intensive',
+      interests: ['nature', 'local', 'food', 'photo'],
+      wakeUpTime: 'early',
+      accommodation: 'hostel',
+      budgetLevel: 'backpacker',
+      budgetRange: [0, 200],
+      foodPrefs: ['street', 'local_must'],
+    },
+  },
+  {
+    id: 'solo_chill',
+    label: '一个人放空',
+    icon: '🧳',
+    desc: '随心 · 文艺 · 不赶',
+    peopleCount: 1,
+    prefs: {
+      companion: 'solo',
+      pace: 'relaxed',
+      interests: ['artsy', 'photo', 'food', 'local'],
+      wakeUpTime: 'late',
+      accommodation: 'boutique_bnb',
+      budgetLevel: 'economy',
+      budgetRange: [200, 400],
+      foodPrefs: ['local_must'],
+    },
+  },
 ];
 
 export const DATE_MODE_OPTIONS = [

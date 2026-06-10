@@ -762,9 +762,12 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
       "attractions": [
         {
           "name": "景点名",
-          "description": "一句话描述",
+          "description": "为什么值得去：用一句大白话点出它最大的特色/看点，不要写百科式介绍，让没去过的人秒懂",
+          "highlight": "最值得做的一件事：最出片的机位 / 必看的那一处 / 必体验的项目（具体，别空泛）",
+          "suitableFor": "适合谁：从 亲子/情侣/摄影爱好者/历史文化迷/带老人/年轻人打卡 等里选最贴切的1-2个",
           "category": "类别",
           "duration": "建议游览时长",
+          "bestTime": "建议时段：如 上午人少、傍晚看日落、避开周末（没有特别建议就留空）",
           "cost": 0
         }
       ],

@@ -14,7 +14,7 @@ import { getDressAndUmbrellaAdvice } from '@/lib/weather-advice';
 import { parseSSEResponse } from '@/lib/parse-sse';
 import { createClient as createSupabaseClient } from '@/lib/supabase-browser';
 import RegisterPrompt from './RegisterPrompt';
-import { buildDianpingUrl, buildAmapNavUrl } from '@/lib/amap-uri';
+import { buildDianpingUrl, buildAmapNavUrl, buildCtripTicketUrl, buildMeituanTicketUrl } from '@/lib/amap-uri';
 
 const TripRouteMap = dynamic(() => import('./TripRouteMap'), {
   ssr: false,
@@ -142,6 +142,51 @@ export default function PlanResultDirect({
   const [shareMsg, setShareMsg] = useState('');
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
   const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [todayOnly, setTodayOnly] = useState(false);
+
+  const todayIso = useMemo(() => {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }, []);
+
+  function mutateItinerary(fn: (itin: any[]) => any[]) {
+    setLocalPlans((prev) =>
+      prev.map((p, i) => (i === activeIdx ? { ...p, itinerary: fn([...(p.itinerary || [])]) } : p)),
+    );
+  }
+  function deleteActivity(dayIdx: number, actIdx: number) {
+    mutateItinerary((itin) =>
+      itin.map((d, di) =>
+        di === dayIdx ? { ...d, activities: (d.activities || []).filter((_: any, ai: number) => ai !== actIdx) } : d,
+      ),
+    );
+  }
+  function moveActivity(dayIdx: number, actIdx: number, dir: -1 | 1) {
+    mutateItinerary((itin) =>
+      itin.map((d, di) => {
+        if (di !== dayIdx) return d;
+        const acts = [...(d.activities || [])];
+        const j = actIdx + dir;
+        if (j < 0 || j >= acts.length) return d;
+        [acts[actIdx], acts[j]] = [acts[j], acts[actIdx]];
+        return { ...d, activities: acts };
+      }),
+    );
+  }
+  function deleteDay(dayIdx: number) {
+    mutateItinerary((itin) => itin.filter((_, di) => di !== dayIdx).map((d, idx) => ({ ...d, day: idx + 1 })));
+  }
+  function moveDay(dayIdx: number, dir: -1 | 1) {
+    mutateItinerary((itin) => {
+      const next = [...itin];
+      const j = dayIdx + dir;
+      if (j < 0 || j >= next.length) return next;
+      [next[dayIdx], next[j]] = [next[j], next[dayIdx]];
+      return next.map((d, idx) => ({ ...d, day: idx + 1 }));
+    });
+  }
 
   useEffect(() => {
     const sb = createSupabaseClient();
@@ -149,6 +194,7 @@ export default function PlanResultDirect({
     sb.auth.getUser().then(({ data }) => setIsLoggedIn(!!data.user));
   }, []);
   const activePlan = localPlans[activeIdx];
+  const todayIdx = (activePlan?.itinerary || []).findIndex((d: any) => d?.dateIso && d.dateIso === todayIso);
   const activePlanRef = useRef(activePlan);
   activePlanRef.current = activePlan;
   const displayTips = activePlan ? normalizeTips(activePlan.tips) : [];
@@ -481,6 +527,28 @@ export default function PlanResultDirect({
             {regenerating ? '生成中…' : '🔄 重新生成'}
           </button>
         )}
+        {todayIdx >= 0 && (
+          <button
+            onClick={() => setTodayOnly((v) => !v)}
+            className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${
+              todayOnly
+                ? 'border-sky-300 bg-sky-50 text-sky-700 hover:bg-sky-100'
+                : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            {todayOnly ? '📋 看全程' : '📍 今日导览'}
+          </button>
+        )}
+        <button
+          onClick={() => setEditing((v) => !v)}
+          className={`px-3 py-2 rounded-lg border text-sm font-medium transition ${
+            editing
+              ? 'border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+              : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
+          }`}
+        >
+          {editing ? '✅ 完成编辑' : '✏️ 改行程'}
+        </button>
         <button
           onClick={() => { if (isLoggedIn === false) { setShowRegisterPrompt(true); return; } handleExportDoc(); }}
           className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm text-gray-700 hover:bg-gray-50"
@@ -639,9 +707,35 @@ export default function PlanResultDirect({
             })()}
 
 
-            {(activePlan.itinerary || []).map((day: any, i: number) => (
-              <DayTimeline key={i} day={day} tripWeather={recommendations?.weather ?? null} transportModes={trip.preferences?.transportModes} />
-            ))}
+            {editing && !todayOnly && (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
+                编辑模式：可删除/上下移动每条活动或整天。改完点右上角「完成编辑」。
+              </div>
+            )}
+            {todayOnly && (
+              <div className="rounded-xl border border-sky-100 bg-sky-50 px-4 py-2.5 text-sm text-sky-800">
+                📍 今日导览：只显示今天（{todayIso}）的安排。点右上角「看全程」回到完整行程。
+              </div>
+            )}
+
+            {(activePlan.itinerary || []).map((day: any, i: number) => {
+              if (todayOnly && i !== todayIdx) return null;
+              return (
+                <DayTimeline
+                  key={i}
+                  day={day}
+                  tripWeather={recommendations?.weather ?? null}
+                  transportModes={trip.preferences?.transportModes}
+                  editing={editing && !todayOnly}
+                  isFirstDay={i === 0}
+                  isLastDay={i === (activePlan.itinerary || []).length - 1}
+                  onDeleteActivity={(actIdx) => deleteActivity(i, actIdx)}
+                  onMoveActivity={(actIdx, dir) => moveActivity(i, actIdx, dir)}
+                  onDeleteDay={() => deleteDay(i)}
+                  onMoveDay={(dir) => moveDay(i, dir)}
+                />
+              );
+            })}
 
             {displayTips.length > 0 && (
               <div className="bg-amber-50 rounded-xl p-5">
@@ -689,7 +783,20 @@ export default function PlanResultDirect({
                           {a.rating ? (
                             <span className="inline-block text-xs text-amber-600 font-medium mt-0.5">⭐ {Number(a.rating).toFixed(1)}分</span>
                           ) : null}
-                          <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{a.description}</p>
+                          {a.description ? (
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{a.description}</p>
+                          ) : null}
+                          {a.highlight ? (
+                            <p className="text-xs text-orange-600 mt-1 leading-snug">✨ {a.highlight}</p>
+                          ) : null}
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1">
+                            {a.suitableFor ? (
+                              <span className="text-[11px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">👥 {a.suitableFor}</span>
+                            ) : null}
+                            {a.bestTime ? (
+                              <span className="text-[11px] text-sky-700 bg-sky-50 px-1.5 py-0.5 rounded">⏰ {a.bestTime}</span>
+                            ) : null}
+                          </div>
                           {a.openTime ? (
                             <p className="text-xs text-gray-400 mt-0.5">🕐 {a.openTime}</p>
                           ) : null}
@@ -698,6 +805,24 @@ export default function PlanResultDirect({
                             {' · '}
                             <a href={buildAmapNavUrl(a.name)} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:underline">导航</a>
                           </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                            <a
+                              href={buildCtripTicketUrl(a.name, trip.destinations?.[0])}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-0.5 text-[11px] text-blue-700 bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded-md transition"
+                            >
+                              🎫 携程门票
+                            </a>
+                            <a
+                              href={buildMeituanTicketUrl(a.name, trip.destinations?.[0])}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-0.5 text-[11px] text-yellow-700 bg-yellow-50 hover:bg-yellow-100 px-2 py-0.5 rounded-md transition"
+                            >
+                              美团门票
+                            </a>
+                          </div>
                         </div>
                       </div>
                     </div>
