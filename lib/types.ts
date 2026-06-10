@@ -75,6 +75,26 @@ export interface DayActivity {
     specialty?: string;
     reason?: string;
   };
+  /** 可选：高德真实地点数据回填（图片/评分/营业时间/坐标等） */
+  placeInfo?: PlaceInfo;
+}
+
+/** 高德回填的真实地点信息 */
+export interface PlaceInfo {
+  /** 实景图片地址 */
+  photo?: string;
+  /** 评分（高德 biz_ext.rating） */
+  rating?: number;
+  /** 营业时间文本 */
+  openTime?: string;
+  /** 人均/门票参考价（元） */
+  cost?: number;
+  /** 详细地址 */
+  address?: string;
+  /** 联系电话 */
+  tel?: string;
+  /** 经纬度 "lng,lat"，用于导航 */
+  location?: string;
 }
 
 export interface DayPlan {
@@ -94,6 +114,14 @@ export interface Attraction {
   duration: string;
   cost: number;
   rating?: number;
+  /** 高德回填：实景图片 */
+  image?: string;
+  /** 高德回填：营业时间 */
+  openTime?: string;
+  /** 高德回填：详细地址 */
+  address?: string;
+  /** 高德回填：经纬度 "lng,lat" */
+  location?: string;
 }
 
 export interface Accommodation {

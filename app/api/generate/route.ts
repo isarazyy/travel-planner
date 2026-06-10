@@ -24,6 +24,7 @@ import { checkUsageLimit, setGuestUsageCookie, recordUsage } from '@/lib/usage-l
 import { getLastQwenUsage } from '@/lib/qwen';
 import { collectRealDataForTrip } from '@/lib/amap-data-collector';
 import { postEnrichTransitData } from '@/lib/post-enrich-transit';
+import { postEnrichPoiData } from '@/lib/post-enrich-poi';
 import { backfillDrivingData } from '@/lib/backfill-driving';
 import { optimizeRoute } from '@/lib/route-optimizer';
 import { createJob, updateJobStatus } from '@/lib/generation-job';
@@ -416,6 +417,7 @@ export async function POST(request: NextRequest) {
     const transportFoodContext = transportFoodRes.status === 'fulfilled' ? transportFoodRes.value.contextText : '';
     const transportFoodWebSearchUsed = transportFoodRes.status === 'fulfilled' ? transportFoodRes.value.used : false;
     const realDataContext = realDataRes.status === 'fulfilled' ? realDataRes.value.promptText : '';
+    const realData = realDataRes.status === 'fulfilled' ? realDataRes.value : null;
     const optimizedRoute = routeRes.status === 'fulfilled' ? routeRes.value : null;
     const { promptText: weatherContext, payload: weatherPayload } =
       weatherRes.status === 'fulfilled' ? weatherRes.value : emptyWeather;
@@ -437,6 +439,7 @@ export async function POST(request: NextRequest) {
       const built = buildResult(parseJsonResponse(raw), hotelWebSearchUsed, transportFoodWebSearchUsed, weatherPayload);
       await backfillWeatherFromResult(built as Record<string, unknown>, formData);
       if (!isFast) await postEnrichTransitData(built as Record<string, unknown>);
+      await postEnrichPoiData(built as Record<string, unknown>, realData, formData, !isFast);
       if (hasSelfDriveMode) await backfillDrivingData(built as Record<string, unknown>);
       return maybePersist(built as Record<string, unknown>);
     } catch (err: any) {
@@ -456,6 +459,7 @@ export async function POST(request: NextRequest) {
       const built = buildResult(parseJsonResponse(raw), hotelWebSearchUsed, transportFoodWebSearchUsed, weatherPayload, true);
       await backfillWeatherFromResult(built as Record<string, unknown>, formData);
       if (!isFast) await postEnrichTransitData(built as Record<string, unknown>);
+      await postEnrichPoiData(built as Record<string, unknown>, realData, formData, !isFast);
       if (hasSelfDriveMode) await backfillDrivingData(built as Record<string, unknown>);
       return maybePersist(built as Record<string, unknown>);
     }

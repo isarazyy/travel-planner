@@ -146,6 +146,33 @@ export default function DayTimeline({
                   </span>
                   {act.cost > 0 && <span>💰 ¥{act.cost}</span>}
                 </div>
+                {act.placeInfo && (act.placeInfo.photo || act.placeInfo.rating || act.placeInfo.openTime) ? (
+                  <div className="mt-2">
+                    {act.placeInfo.photo ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={act.placeInfo.photo}
+                        alt={sanitizePlanString(act.activity, '景点')}
+                        loading="lazy"
+                        className="w-full max-w-[300px] h-36 object-cover rounded-lg border border-gray-100"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).style.display = 'none';
+                        }}
+                      />
+                    ) : null}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs mt-1.5">
+                      {act.placeInfo.rating ? (
+                        <span className="text-amber-600 font-medium">⭐ {act.placeInfo.rating.toFixed(1)}分</span>
+                      ) : null}
+                      {act.placeInfo.openTime ? (
+                        <span className="text-gray-500">🕐 {act.placeInfo.openTime}</span>
+                      ) : null}
+                      {act.placeInfo.tel ? (
+                        <span className="text-gray-400">📞 {act.placeInfo.tel}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
                 {notesDisplay ? (
                   <p className="text-xs text-gray-400 mt-1">{notesDisplay}</p>
                 ) : null}

@@ -668,16 +668,38 @@ export default function PlanResultDirect({
                 <div className="space-y-3">
                   {(activePlan.attractions || []).map((a: any, i: number) => (
                     <div key={i} className="border-b border-gray-50 pb-3 last:border-0 last:pb-0">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-medium text-gray-900">{a.name}</span>
-                        {a.cost > 0 && <span className="text-xs text-orange-500">¥{a.cost}</span>}
+                      <div className="flex gap-3">
+                        {a.image ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={a.image}
+                            alt={a.name}
+                            loading="lazy"
+                            className="w-20 h-20 flex-shrink-0 object-cover rounded-lg border border-gray-100"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-sm font-medium text-gray-900">{a.name}</span>
+                            {a.cost > 0 && <span className="text-xs text-orange-500 flex-shrink-0">¥{a.cost}</span>}
+                          </div>
+                          {a.rating ? (
+                            <span className="inline-block text-xs text-amber-600 font-medium mt-0.5">⭐ {Number(a.rating).toFixed(1)}分</span>
+                          ) : null}
+                          <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{a.description}</p>
+                          {a.openTime ? (
+                            <p className="text-xs text-gray-400 mt-0.5">🕐 {a.openTime}</p>
+                          ) : null}
+                          <p className="text-xs text-gray-400 mt-1">
+                            {a.category}{a.duration ? ` · ${a.duration}` : ''}
+                            {' · '}
+                            <a href={buildAmapNavUrl(a.name)} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:underline">导航</a>
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">{a.description}</p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        {a.category}{a.duration ? ` · ${a.duration}` : ''}
-                        {' · '}
-                        <a href={buildAmapNavUrl(a.name)} target="_blank" rel="noopener noreferrer" className="text-slate-500 hover:underline">导航</a>
-                      </p>
                     </div>
                   ))}
                 </div>

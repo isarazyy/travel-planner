@@ -8,6 +8,8 @@ import StepBudgetAccom from '@/components/StepForm/StepBudgetAccom';
 import PlanResultDirect from '@/components/PlanResultDirect';
 import RegisterPrompt from '@/components/RegisterPrompt';
 import MountainRunForm from '@/components/MountainRunForm';
+import GeneratingProgress from '@/components/GeneratingProgress';
+import GenerateError from '@/components/GenerateError';
 import type { TripFormData } from '@/lib/types';
 import { compareIso } from '@/lib/date-utils';
 import { parseSSEResponse } from '@/lib/parse-sse';
@@ -91,6 +93,7 @@ function PlanContent() {
   const [result, setResult] = useState<any>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartRef = useRef<number>(0);
+  const lastPayloadRef = useRef<TripFormData | null>(null);
 
   // Quick mode fields
   const [quickDeparture, setQuickDeparture] = useState('');
@@ -162,6 +165,7 @@ function PlanContent() {
   };
 
   async function doGenerate(payload: TripFormData) {
+    lastPayloadRef.current = payload;
     setLoading(true);
     setError('');
     try {
@@ -260,6 +264,14 @@ function PlanContent() {
     await doGenerate(payload as TripFormData);
   }
 
+  function handleRetry() {
+    if (lastPayloadRef.current) doGenerate(lastPayloadRef.current);
+  }
+
+  function handleRetryFast() {
+    if (lastPayloadRef.current) doGenerate({ ...lastPayloadRef.current, generationMode: 'fast' });
+  }
+
   async function handleUpgradeStandard() {
     await handleGenerate('standard');
   }
@@ -344,6 +356,22 @@ function PlanContent() {
 
       {/* Travel tab */}
       {topTab === 'travel' && (
+        loading ? (
+          <GeneratingProgress
+            mode={data.generationMode}
+            note={
+              typeof window !== 'undefined' && localStorage.getItem('gen_job_id')
+                ? '已转入后台生成，你可以去浏览其他页面，完成后会自动显示结果'
+                : undefined
+            }
+            onCancel={() => {
+              stopPolling();
+              if (typeof window !== 'undefined') localStorage.removeItem('gen_job_id');
+              setLoading(false);
+              setError('');
+            }}
+          />
+        ) : (
         <>
           {/* Mode switcher */}
           <div className="mb-6 flex items-center justify-center">
@@ -432,7 +460,15 @@ function PlanContent() {
               </div>
 
               {error && (
-                <div className="mt-4 bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">{error}</div>
+                <div className="mt-4">
+                  <GenerateError
+                    message={error}
+                    canRetry={!!lastPayloadRef.current}
+                    isFast={data.generationMode === 'fast'}
+                    onRetry={handleRetry}
+                    onRetryFast={handleRetryFast}
+                  />
+                </div>
               )}
 
               <button
@@ -521,7 +557,15 @@ function PlanContent() {
 
               {/* Error */}
               {error && (
-                <div className="mt-4 bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm">{error}</div>
+                <div className="mt-4">
+                  <GenerateError
+                    message={error}
+                    canRetry={!!lastPayloadRef.current}
+                    isFast={data.generationMode === 'fast'}
+                    onRetry={handleRetry}
+                    onRetryFast={handleRetryFast}
+                  />
+                </div>
               )}
 
               {/* Navigation */}
@@ -565,6 +609,7 @@ function PlanContent() {
             </>
           )}
         </>
+        )
       )}
     </div>
   );
