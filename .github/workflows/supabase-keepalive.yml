@@ -21,7 +21,7 @@ jobs:
           set -e
           echo "=== REST 查询（制造数据库活动）==="
           REST_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 \
-            "$SB_URL/rest/v1/shared-plans?select=id&limit=1" \
+            "$SB_URL/rest/v1/trips?select=id&limit=1" \
             -H "apikey: $SB_ANON" -H "Authorization: Bearer $SB_ANON")
           echo "REST 状态: $REST_CODE"
 
