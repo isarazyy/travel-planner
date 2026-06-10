@@ -737,15 +737,13 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
         {
           "day": 1,
           "date": "${jsonDateFieldExample}",
-          "theme": "抵达青岛·老城初探",
+          "theme": "抵达青岛·海滨初探（长途转场日=只排轻活动的示范）",
           "activities": [
-            {"time": "08:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约5小时", "cost": 0, "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约5小时", "priceNote": "油费+过路费约600元"}},
-            {"time": "11:30", "activity": "途中午餐", "location": "沿途服务区", "duration": "约1小时", "cost": 80, "foodRecommendation": {"shopName": "服务区当地小吃", "rating": 4.0, "specialty": "快餐"}},
-            {"time": "14:00", "activity": "游览栈桥", "location": "青岛栈桥", "duration": "约1小时", "cost": 0, "notes": "青岛标志性景点"},
-            {"time": "15:30", "activity": "漫步中山路老街区", "location": "中山路商业街", "duration": "约1.5小时", "cost": 0},
-            {"time": "17:00", "activity": "入住酒店", "location": "五四广场附近", "duration": "约0.5小时", "cost": 0, "stayInfo": {"hotelName": "全季青岛五四广场店", "pricePerNight": 400}},
-            {"time": "18:00", "activity": "晚餐探店", "location": "青岛市南区", "duration": "约1.5小时", "cost": 120, "foodRecommendation": {"shopName": "船歌鱼水饺（闽江路店）", "rating": 4.7, "specialty": "鲅鱼水饺/海鲜", "reason": "本地高分连锁"}},
-            {"time": "20:00", "activity": "夜游五四广场+奥帆中心", "location": "五四广场", "duration": "约1小时", "cost": 0, "notes": "夜景灯光秀"}
+            {"time": "08:00", "activity": "自驾前往青岛", "location": "北京→青岛", "duration": "约6.5小时", "cost": 0, "transportInfo": {"fromStation": "北京", "toStation": "青岛", "distance": "约630公里", "duration": "约6.5小时（按高速实际通行估算，含休息与拥堵）", "priceNote": "油费+过路费约600元"}},
+            {"time": "12:00", "activity": "途中午餐", "location": "沿途服务区/城镇", "duration": "约1小时", "cost": 80, "foodRecommendation": {"shopName": "服务区当地小吃", "rating": 4.0, "specialty": "快餐"}},
+            {"time": "15:30", "activity": "抵达青岛、入住酒店稍作休整", "location": "五四广场附近", "duration": "约1小时", "cost": 0, "stayInfo": {"hotelName": "全季青岛五四广场店", "pricePerNight": 400}},
+            {"time": "17:00", "activity": "栈桥与海滨步道散步", "location": "青岛栈桥", "duration": "约1.5小时", "cost": 0, "notes": "长途开了一天，抵达当天只排1个就近轻活动，不再塞夜游"},
+            {"time": "18:30", "activity": "晚餐探店", "location": "青岛市南区", "duration": "约1.5小时", "cost": 120, "foodRecommendation": {"shopName": "船歌鱼水饺（闽江路店）", "rating": 4.7, "specialty": "鲅鱼水饺/海鲜", "reason": "本地高分连锁"}}
           ]
         },
         {
@@ -760,6 +758,17 @@ ${fixedDayCount && fixedDayCount > 10 ? `- **长行程（${fixedDayCount}天）*
             {"time": "16:00", "activity": "逛大学路咖啡街区", "location": "大学路", "duration": "约1小时", "cost": 40},
             {"time": "17:30", "activity": "晚餐", "location": "青岛市南区", "duration": "约1.5小时", "cost": 150},
             {"time": "19:30", "activity": "夜逛台东夜市", "location": "台东步行街", "duration": "约1.5小时", "cost": 50, "notes": "青岛最热闹的夜市"}
+          ]
+        },
+        {
+          "day": 3,
+          "date": "（示例：最后一天=返程日。返程占满全天就不硬塞景点；theme 按真实活动命名，严禁写'返程准备/自由活动'）",
+          "theme": "海滨晨光·返程北京",
+          "activities": [
+            {"time": "08:00", "activity": "酒店早餐", "location": "酒店", "duration": "约0.5小时", "cost": 0},
+            {"time": "08:30", "activity": "退房、海边最后散步", "location": "栈桥海滨", "duration": "约1小时", "cost": 0, "notes": "返程前安排1项真实就近活动，而不是空写'整理行李'"},
+            {"time": "10:00", "activity": "自驾返回北京", "location": "青岛→北京", "duration": "约6.5小时", "cost": 0, "transportInfo": {"fromStation": "青岛", "toStation": "北京", "distance": "约630公里", "duration": "约6.5小时", "priceNote": "油费+过路费约600元"}},
+            {"time": "13:00", "activity": "途中午餐", "location": "沿途服务区", "duration": "约1小时", "cost": 80}
           ]
         }
       ],
