@@ -156,7 +156,7 @@ export async function backfillDrivingData(result: Record<string, unknown>) {
               [0],
             );
             const route = results[0]?.routes[0];
-            if (route && route.distance > 0) {
+            if (route && route.distance >= 3000) {
               const km = Math.round(route.distance / 1000);
               const hours = Math.floor(route.duration / 3600);
               const mins = Math.floor((route.duration % 3600) / 60);
