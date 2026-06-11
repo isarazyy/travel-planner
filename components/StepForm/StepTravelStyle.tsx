@@ -36,6 +36,18 @@ export default function StepTravelStyle({
     });
   }
 
+  // 微调人数/童龄时保留预设高亮（属于对同一人群的细化，而非切换）
+  function patchKeepPreset(updates: Record<string, unknown>) {
+    onChange({ ...data, preferences: { ...prefs, ...updates } });
+  }
+
+  function setPeopleCount(n: number) {
+    onChange({ ...data, peopleCount: n });
+  }
+
+  const companionLabel =
+    COMPANION_OPTIONS.find((o) => o.value === prefs.companion)?.label ?? '独自旅行';
+
   function toggleTransport(value: string) {
     const isOn = transportSelected.includes(value);
     if (isOn && transportSelected.length <= 1) return;
@@ -45,36 +57,15 @@ export default function StepTravelStyle({
     patch({ transportModes: next });
   }
 
-  function setCompanion(value: string) {
-    setActivePreset(null);
-    const updates: Record<string, unknown> = { companion: value };
-    if (value !== 'family') updates.childAge = undefined;
-    const autoCounts: Record<string, number> = { solo: 1, couple: 2 };
-    const autoCount = autoCounts[value];
-    if (autoCount) {
-      onChange({ ...data, peopleCount: autoCount, preferences: { ...prefs, ...updates } });
-      return;
-    }
-    if (value === 'family' && data.peopleCount < 2) {
-      onChange({ ...data, peopleCount: 3, preferences: { ...prefs, ...updates } });
-      return;
-    }
-    if (value === 'elderly' && data.peopleCount < 2) {
-      onChange({ ...data, peopleCount: 2, preferences: { ...prefs, ...updates } });
-      return;
-    }
-    patch(updates);
-  }
-
   const cardSel = 'border-orange-500 bg-orange-50 ring-1 ring-orange-500/20';
   const cardUn = 'border-gray-200';
 
   return (
     <div className="space-y-8">
-      {/* Quick presets */}
+      {/* Quick presets = 人群 + 玩法一次选好 */}
       <div>
-        <h2 className="text-lg font-semibold text-gray-900">快速预设</h2>
-        <p className="mt-1 mb-3 text-sm text-gray-600">点一下按人群自动填好偏好，之后还能自己微调</p>
+        <h2 className="text-lg font-semibold text-gray-900">和谁出行</h2>
+        <p className="mt-1 mb-3 text-sm text-gray-600">点一下按人群挑好，会顺带填好节奏/兴趣/预算等偏好，下方都能再微调</p>
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
           {TRIP_PRESETS.map((p) => {
             const isSel = activePreset === p.id;
@@ -96,8 +87,49 @@ export default function StepTravelStyle({
             );
           })}
         </div>
+
+        {/* 所选人群的细化：人数 / 童龄 */}
+        {prefs.companion === 'family' && (
+          <div className="mt-3">
+            <span className="block text-xs text-gray-600 mb-1.5">孩子年龄</span>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {CHILD_AGE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => patchKeepPreset({ childAge: opt.value })}
+                  className={`rounded-lg border px-3 py-2 text-xs transition ${
+                    prefs.childAge === opt.value ? cardSel : `${cardUn} bg-white`
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {prefs.companion && !['solo', 'couple'].includes(prefs.companion) && (
+          <div className="mt-3 flex items-center gap-2">
+            <span className="text-sm text-gray-600">出行人数</span>
+            <input
+              type="number"
+              min={2}
+              max={20}
+              value={data.peopleCount ?? 2}
+              onChange={(e) => {
+                const raw = parseInt(e.target.value, 10);
+                const clamped = Number.isNaN(raw) ? 2 : Math.max(2, Math.min(20, raw));
+                setPeopleCount(clamped);
+              }}
+              className="w-20 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+            />
+            <span className="text-xs text-gray-400">人</span>
+          </div>
+        )}
         {activePreset && (
-          <p className="mt-2 text-xs text-orange-600">已套用预设，下方偏好可继续修改</p>
+          <p className="mt-2 text-xs text-orange-600">
+            已选「{companionLabel}」，{['solo', 'couple'].includes(prefs.companion) ? `已自动设为 ${prefs.companion === 'solo' ? 1 : 2} 人，` : ''}下方偏好可继续修改
+          </p>
         )}
       </div>
 
@@ -181,70 +213,6 @@ export default function StepTravelStyle({
               </div>
             </div>
           </div>
-        )}
-      </div>
-
-      {/* Companion */}
-      <div>
-        <h2 className="text-lg font-semibold text-gray-900">同行人</h2>
-        <p className="mt-1 mb-3 text-sm text-gray-600">选择本次出行的同行方式</p>
-        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-          {COMPANION_OPTIONS.map((opt) => {
-            const isSel = prefs.companion === opt.value;
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => setCompanion(opt.value)}
-                className={`flex items-center gap-2.5 rounded-xl border p-3 text-left transition ${
-                  isSel ? cardSel : `${cardUn} bg-white hover:border-gray-300`
-                }`}
-              >
-                <span className="text-xl">{opt.icon}</span>
-                <span className="font-medium text-gray-900 text-sm">{opt.label}</span>
-              </button>
-            );
-          })}
-        </div>
-        {prefs.companion === 'family' && (
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {CHILD_AGE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => patch({ childAge: opt.value })}
-                className={`rounded-lg border px-3 py-2 text-xs transition ${
-                  prefs.childAge === opt.value ? cardSel : `${cardUn} bg-white`
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        )}
-        {prefs.companion && !['solo', 'couple'].includes(prefs.companion) && (
-          <div className="mt-3 flex items-center gap-2">
-            <span className="text-sm text-gray-600">出行人数</span>
-            <input
-              type="number"
-              min={2}
-              max={20}
-              value={data.peopleCount ?? 2}
-              onChange={(e) => {
-                const raw = parseInt(e.target.value, 10);
-                const clamped = Number.isNaN(raw) ? 2 : Math.max(2, Math.min(20, raw));
-                onChange({ ...data, peopleCount: clamped });
-              }}
-              className="w-20 rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-            />
-            <span className="text-xs text-gray-400">人</span>
-          </div>
-        )}
-        {prefs.companion === 'solo' && (
-          <p className="mt-2 text-xs text-gray-400">已自动设为 1 人</p>
-        )}
-        {prefs.companion === 'couple' && (
-          <p className="mt-2 text-xs text-gray-400">已自动设为 2 人</p>
         )}
       </div>
 
