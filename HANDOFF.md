@@ -1,6 +1,16 @@
-# 项目接手说明（给 Codex）
+# 项目接手说明（给任何接手的 AI / 人）
 
-最后更新：2026-06-16　交接自 Claude 工作流。下面是接手这个项目需要知道的全部要点。
+最后更新：2026-06-17。**项目所有者张阳不写代码、不记技术细节，全靠这份文档。** 接手的 AI 请先完整读这一篇，再动手——这里有继续开发和继续运维线上服务所需的全部信息。
+
+---
+
+## 0. 新接手的 AI：冷启动三步
+
+1. **读完本文件**（尤其第 4 部署、第 7 坑、第 9 账号清单）。
+2. **本地跑起来**：在项目根目录 `npm install` → `npm run dev`（密钥已在 `.env.local`，开箱即用）。
+3. **要改线上**：见第 4 节，push 到 GitHub `main` 会自动部署 Fly.io；本机直连 Fly 被墙，只能走 GitHub Actions。
+
+> 沟通风格：张阳要「改了什么 / 效果 / 有没有问题」，不要代码细节、不要寒暄、用「你」不用「您」、能用表格就用表格。
 
 ## 1. 这是什么
 
@@ -84,3 +94,31 @@ gh run watch $(gh run list --workflow=fly-deploy.yml --limit 1 --json databaseId
 2. `git push origin main` 触发部署，用 gh 看 Actions 结果
 3. 用 curl 打线上 `/api/generate` 验证（SSE，取最后一行 `data:` 解析 JSON）
 4. 生成质量类问题：先怀疑 `prompts.ts` 的 few-shot 示例（示例的影响力 > 抽象规则，多次踩坑验证）
+
+## 9. 账号与密钥清单（命脉，务必看）
+
+线上服务能不能活，取决于下面这些**云账号**没失效/没欠费——它们不在代码里，跟代码包无关。
+
+| 服务 | 标识 | 作用 | 密钥在哪 | 备注 |
+|------|------|------|----------|------|
+| **阿里云 DashScope** | 千问 API | 生成方案/对话（核心） | `.env.local` 的 `DASHSCOPE_API_KEY` | **最花钱，欠费即停，优先盯余额** |
+| **Supabase** | 项目 ref `okopihgxwjmjikajpzyv` | 数据库 + 登录 + 历史行程 | `.env.local` 的 `NEXT_PUBLIC_SUPABASE_*` 和 `SUPABASE_SERVICE_ROLE_KEY` | 免费项目长期不用会休眠 → 登录报 fetch failed；已用 `supabase-keepalive.yml` 每天 ping 防休眠 |
+| **高德地图** | Web 服务 key | POI/地理编码/驾车/天气 | `.env.local` 的 `AMAP_KEY`、`NEXT_PUBLIC_AMAP_KEY`、`NEXT_PUBLIC_AMAP_SECURITY_JSCODE` | 有 QPS 限制，已做退避 |
+| **Fly.io** | app `travel-planner-zy`，region `nrt` | 跑线上服务器 | 服务端密钥在 Fly secrets，用 `fly secrets list` 查名字 | 部署只能走 GitHub Actions |
+| **GitHub** | repo `isarazyy/travel-planner` | 代码仓库 + 自动部署触发 | 新机器需 `gh auth login` | push main 自动部署 |
+| **Tavily** | 未配置 | 住宿联网增强（可选） | 想用就在 `.env.local` 加 `TAVILY_API_KEY` | 不配只是少个增强 |
+
+> `.env.local` 已随本包一起给出，含上面除 Tavily 外的全部真实 Key，本地开箱即用。Fly 线上的公开 Key 写在 `fly.toml` build args，服务端密钥在 Fly secrets。
+
+## 10. 换电脑 / 换 AI 怎么完整接上
+
+**只想本地开发**：解压本包 → `npm install` → `npm run dev`，完事（密钥已带）。
+
+**要继续维护线上**（改完能自动部署），按顺序：
+1. `git clone https://github.com/isarazyy/travel-planner.git`（用 clone 的仓库当主目录，**别用这个去了 .git 的解压包**，否则 push 不了）
+2. 把本包里的 `.env.local` 复制进 clone 出来的目录（仓库里不含密钥）
+3. `gh auth login` 登录 GitHub（用 `isarazyy` 账号）→ 之后 `git push origin main` 即自动部署
+4. 可选：装 `flyctl` 并 `fly auth login` 用于查看 `fly secrets list` / 日志（部署本身不需要本机 fly，走 Actions）
+5. 确认第 9 节那几个云账号没欠费/没过期，线上就能继续跑
+
+**新 AI 接手**：把本包发给它，让它先读 `HANDOFF.md` 整篇即可，不需要其他口头交代。
