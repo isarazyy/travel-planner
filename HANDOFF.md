@@ -110,6 +110,16 @@ gh run watch $(gh run list --workflow=fly-deploy.yml --limit 1 --json databaseId
 
 > `.env.local` 已随本包一起给出，含上面除 Tavily 外的全部真实 Key，本地开箱即用。Fly 线上的公开 Key 写在 `fly.toml` build args，服务端密钥在 Fly secrets。
 
+### 查余额 / 充值去哪（张阳自己管，定期看一眼）
+
+| 服务 | 控制台 / 查余额 | 说明 |
+|------|----------------|------|
+| 阿里云 千问 | 百炼控制台 https://bailian.console.aliyun.com/ ；费用/余额 https://usercenter2.aliyun.com/ → 费用中心；充值 https://www.aliyun.com/ 右上「费用」→ 充值 | 走阿里云账户余额，**余额耗尽 API 直接 401/报错，网站就生成不了**。最该定期盯的就是这个 |
+| Supabase | https://supabase.com/dashboard → 选项目 → Settings/Billing | 免费档够用；注意免费项目长期闲置会休眠（已有 keepalive 防着） |
+| 高德 | https://console.amap.com/ → 应用管理/配额 | 个人开发者有每日免费调用配额，超了当天限流；看用量在控制台 |
+| Fly.io | https://fly.io/dashboard → 选 org → Billing | 小流量基本在免费额度内；欠费会停机 |
+| GitHub | https://github.com/settings/billing | 免费，基本不用管 |
+
 ## 10. 换电脑 / 换 AI 怎么完整接上
 
 **只想本地开发**：解压本包 → `npm install` → `npm run dev`，完事（密钥已带）。
